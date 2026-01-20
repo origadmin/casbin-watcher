@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/casbin/casbin"
+	"github.com/casbin/casbin/v3"
 	gnatsd "github.com/nats-io/nats-server/v2/test"
 	"github.com/nats-io/nats.go"
 
 	// Enable inmemory and NATS drivers
-	_ "github.com/origadmin/casbin-watcher/drivers/mempubsub"
-	_ "github.com/origadmin/casbin-watcher/drivers/natspubsub"
-	_ "github.com/origadmin/casbin-watcher/drivers/rabbitpubsub"
+	_ "github.com/origadmin/casbin-watcher/v3/drivers/mempubsub"
+	_ "github.com/origadmin/casbin-watcher/v3/drivers/natspubsub"
+	_ "github.com/origadmin/casbin-watcher/v3/drivers/rabbitpubsub"
 )
 
 func TestNATSWatcher(t *testing.T) {

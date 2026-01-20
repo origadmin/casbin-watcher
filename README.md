@@ -5,7 +5,7 @@
 ## Installation
 
 ```
-go get github.com/rusenask/casbin-go-cloud-watcher
+go get github.com/origadmin/casbin-watcher
 ```
 
 ## Usage
@@ -28,9 +28,9 @@ You can view provider configuration examples here: https://github.com/google/go-
 
 ```go
 import (
-    cloudwatcher "github.com/rusenask/casbin-go-cloud-watcher"
+cloudwatcher "github.com/origadmin/casbin-watcher"
     // Enable NATS driver
-    _ "github.com/rusenask/casbin-go-cloud-watcher/drivers/natspubsub"
+_ "github.com/origadmin/casbin-watcher/drivers/natspubsub"
     
     "github.com/casbin/casbin"
 )
@@ -56,9 +56,9 @@ func main() {
 
 ```go
 import (
-    cloudwatcher "github.com/rusenask/casbin-go-cloud-watcher"
+cloudwatcher "github.com/origadmin/casbin-watcher"
     // Enable in-memory driver
-    _ "github.com/rusenask/casbin-go-cloud-watcher/drivers/mempubsub"
+_ "github.com/origadmin/casbin-watcher/drivers/mempubsub"
     
     "github.com/casbin/casbin"
 )
@@ -83,9 +83,9 @@ URLs are `gcppubsub://projects/myproject/topics/mytopic`. The URLs use the proje
 
 ```go
 import (
-    cloudwatcher "github.com/rusenask/casbin-go-cloud-watcher"
+cloudwatcher "github.com/origadmin/casbin-watcher"
     // Enable in GCP pubsub driver
-    _ "github.com/rusenask/casbin-go-cloud-watcher/drivers/gcppubsub"
+_ "github.com/origadmin/casbin-watcher/drivers/gcppubsub"
 
     "github.com/casbin/casbin"
 )
@@ -113,9 +113,9 @@ Watcher will create a default AWS Session with the *SharedConfigEnable* option e
 
 ```go
 import (
-    cloudwatcher "github.com/rusenask/casbin-go-cloud-watcher"
+cloudwatcher "github.com/origadmin/casbin-watcher"
     // Enable AWS SQS & SNS driver
-    _ "github.com/rusenask/casbin-go-cloud-watcher/drivers/awssnssqs"
+_ "github.com/origadmin/casbin-watcher/drivers/awssnssqs"
 
 
     "github.com/casbin/casbin"
@@ -145,9 +145,9 @@ Watcher can publish to an [Amazon Simple Queue Service](https://aws.amazon.com/s
 
 ```go
 import (
-    cloudwatcher "github.com/rusenask/casbin-go-cloud-watcher"/
+cloudwatcher "github.com/origadmin/casbin-watcher"/
     // Enable AWS SQS & SNS driver
-    _ "github.com/rusenask/casbin-go-cloud-watcher/drivers/awssnssqs"
+_ "github.com/origadmin/casbin-watcher/drivers/awssnssqs"
     "github.com/casbin/casbin"
 )
 
@@ -174,9 +174,9 @@ Watcher can publish to an [Azure Service Bus](https://azure.microsoft.com/en-us/
 
 ```go
 import (
-    cloudwatcher "github.com/rusenask/casbin-go-cloud-watcher"
+cloudwatcher "github.com/origadmin/casbin-watcher"
     // Enable Azure Service Bus driver
-    _ "github.com/rusenask/casbin-go-cloud-watcher/drivers/azuresb"
+_ "github.com/origadmin/casbin-watcher/drivers/azuresb"
 
     "github.com/casbin/casbin"
 )
@@ -206,9 +206,9 @@ Watcher can publish to a [Kafka](https://kafka.apache.org/) cluster. A Kafka URL
 
 ```go
 import (
-    cloudwatcher "github.com/rusenask/casbin-go-cloud-watcher"
+cloudwatcher "github.com/origadmin/casbin-watcher"
     // Enable Kafka driver
-    _ "github.com/rusenask/casbin-go-cloud-watcher/drivers/kafkapubsub"
+_ "github.com/origadmin/casbin-watcher/drivers/kafkapubsub"
 
     "github.com/casbin/casbin"
 )
