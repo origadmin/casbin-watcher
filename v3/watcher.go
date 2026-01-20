@@ -11,6 +11,10 @@ import (
 
 	"github.com/casbin/casbin/v3/persist"
 	"gocloud.dev/pubsub"
+
+	_ "gocloud.dev/pubsub/kafkapubsub"
+	_ "gocloud.dev/pubsub/natspubsub"
+	_ "gocloud.dev/pubsub/rabbitpubsub"
 )
 
 // check interface compatibility
@@ -51,8 +55,8 @@ func New(ctx context.Context, url string) (*Watcher, error) {
 // A classic callback is Enforcer.LoadPolicy().
 func (w *Watcher) SetUpdateCallback(callbackFunc func(string)) error {
 	w.connMu.Lock()
+	defer w.connMu.Unlock()
 	w.callbackFunc = callbackFunc
-	w.connMu.Unlock()
 	return nil
 }
 
