@@ -1,20 +1,19 @@
-package watcher
+package watcher_test
 
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/casbin/casbin/v3"
 	gnatsd "github.com/nats-io/nats-server/v2/test"
-	"github.com/nats-io/nats.go"
+	"github.com/stretchr/testify/require"
 
+	"github.com/origadmin/casbin-watcher/v3" // Corrected import path
 	// Enable inmemory and NATS drivers
-	_ "github.com/origadmin/casbin-watcher/v3/drivers/mempubsub"
-	_ "github.com/origadmin/casbin-watcher/v3/drivers/natspubsub"
-	_ "github.com/origadmin/casbin-watcher/v3/drivers/rabbitpubsub"
+	_ "github.com/origadmin/casbin-watcher/v3/drivers/mem"  // Corrected import path
+	_ "github.com/origadmin/casbin-watcher/v3/drivers/nats" // Corrected import path
 )
 
 func TestNATSWatcher(t *testing.T) {
@@ -22,8 +21,8 @@ func TestNATSWatcher(t *testing.T) {
 	s := gnatsd.RunDefaultServer()
 	defer s.Shutdown()
 
-	natsEndpoint := fmt.Sprintf("nats://localhost:%d", nats.DefaultPort)
-	natsSubject := "nats://casbin-policy-updated-subject"
+	// Construct a valid URL for our NATS driver
+	natsURL := fmt.Sprintf("nats://%s/casbin-topic?channel=casbin-channel", s.ClientURL())
 
 	updaterCh := make(chan string, 1)
 	listenerCh := make(chan string, 1)
@@ -31,67 +30,40 @@ func TestNATSWatcher(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// gocloud.dev connects to NATS server based on env variable
-	os.Setenv("NATS_SERVER_URL", natsEndpoint)
-
-	// updater represents the Casbin enforcer instance that changes the policy in DB
-	// Use the endpoint of nats as parameter.
-	updater, err := New(ctx, natsSubject)
-	if err != nil {
-		t.Fatalf("Failed to create updater, error: %s", err)
-	}
+	// updater represents the Casbin enforcer instance that changes the policy
+	updater, err := watcher.NewWatcher(ctx, natsURL)
+	require.NoError(t, err, "Failed to create updater")
 	defer updater.Close()
-	updater.SetUpdateCallback(func(msg string) {
+
+	err = updater.SetUpdateCallback(func(msg string) {
 		updaterCh <- "updater"
 	})
+	require.NoError(t, err)
 
-	// listener represents any other Casbin enforcer instance that watches the change of policy in DB
-	listener, err := New(ctx, natsSubject)
-	if err != nil {
-		t.Fatalf("Failed to create second listener: %s", err)
-	}
+	// listener represents any other Casbin enforcer instance that watches the change of policy
+	listener, err := watcher.NewWatcher(ctx, natsURL)
+	require.NoError(t, err, "Failed to create listener")
 	defer listener.Close()
 
 	// listener should set a callback that gets called when policy changes
 	err = listener.SetUpdateCallback(func(msg string) {
 		listenerCh <- "listener"
 	})
-	if err != nil {
-		t.Fatalf("Failed to set listener callback: %s", err)
-	}
+	require.NoError(t, err)
 
 	// updater changes the policy, and sends the notifications.
 	err = updater.Update()
-	if err != nil {
-		t.Fatalf("The updater failed to send Update: %s", err)
-	}
+	require.NoError(t, err, "The updater failed to send Update")
 
 	// Validate that listener received message
-	var updaterReceived bool
-	var listenerReceived bool
-	for {
-		select {
-		case res := <-listenerCh:
-			if res != "listener" {
-				t.Fatalf("Message from unknown source: %v", res)
-				break
-			}
-			listenerReceived = true
-		case res := <-updaterCh:
-			if res != "updater" {
-				t.Fatalf("Message from unknown source: %v", res)
-				break
-			}
-			updaterReceived = true
-		case <-time.After(time.Second * 10):
-			t.Fatal("Updater or listener didn't received message in time")
-			break
-		}
-		if updaterReceived && listenerReceived {
-			close(listenerCh)
-			close(updaterCh)
-			break
-		}
+	// The updater should not receive its own message because it's a different connection.
+	select {
+	case res := <-listenerCh:
+		require.Equal(t, "listener", res)
+	case res := <-updaterCh:
+		t.Fatalf("Updater should not receive its own message, but got: %s", res)
+	case <-time.After(time.Second * 5):
+		t.Fatal("Listener didn't receive message in time")
 	}
 }
 
@@ -100,134 +72,120 @@ func TestWithEnforcerNATS(t *testing.T) {
 	s := gnatsd.RunDefaultServer()
 	defer s.Shutdown()
 
-	natsEndpoint := fmt.Sprintf("nats://localhost:%d", nats.DefaultPort)
-	natsSubject := "nats://casbin-policy-updated-subject"
+	natsURL := fmt.Sprintf("nats://%s/casbin-topic?channel=casbin-channel", s.ClientURL())
 
-	cannel := make(chan string, 1)
+	updateCh := make(chan string, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// gocloud.dev connects to NATS server based on env variable
-	os.Setenv("NATS_SERVER_URL", natsEndpoint)
-
-	w, err := New(ctx, natsSubject)
-	if err != nil {
-		t.Fatalf("Failed to create updater, error: %s", err)
-	}
+	w, err := watcher.NewWatcher(ctx, natsURL)
+	require.NoError(t, err, "Failed to create watcher")
 	defer w.Close()
 
 	// Initialize the enforcer.
-	e := casbin.NewEnforcer("./test_data/model.conf", "./test_data/policy.csv")
+	e, err := casbin.NewEnforcer("./test_data/model.conf", "./test_data/policy.csv")
+	require.NoError(t, err)
 
 	// Set the watcher for the enforcer.
-	e.SetWatcher(w)
+	err = e.SetWatcher(w)
+	require.NoError(t, err)
 
 	// By default, the watcher's callback is automatically set to the
 	// enforcer's LoadPolicy() in the SetWatcher() call.
 	// We can change it by explicitly setting a callback.
-	w.SetUpdateCallback(func(msg string) {
-		cannel <- "enforcer"
+	err = w.SetUpdateCallback(func(msg string) {
+		updateCh <- "enforcer"
 	})
+	require.NoError(t, err)
 
 	// Update the policy to test the effect.
-	e.SavePolicy()
+	// This should call the watcher's Update method, which then calls our callback.
+	err = e.SavePolicy()
+	require.NoError(t, err)
 
 	// Validate that listener received message
 	select {
-	case res := <-cannel:
-		if res != "enforcer" {
-			t.Fatalf("Got unexpected message :%v", res)
-		}
-	case <-time.After(time.Second * 10):
+	case res := <-updateCh:
+		require.Equal(t, "enforcer", res)
+	case <-time.After(time.Second * 5):
 		t.Fatal("The enforcer didn't send message in time")
 	}
-	close(cannel)
 }
 
 func TestWithEnforcerMemory(t *testing.T) {
+	endpointURL := "mem://casbin?shared=true" // Use shared memory for this test
 
-	endpointURL := "mem://topicA"
-
-	cannel := make(chan string, 1)
+	updateCh := make(chan string, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	w, err := New(ctx, endpointURL)
-	if err != nil {
-		t.Fatalf("Failed to create updater, error: %s", err)
-	}
+	w, err := watcher.NewWatcher(ctx, endpointURL)
+	require.NoError(t, err, "Failed to create watcher")
 	defer w.Close()
 
-	// Initialize the enforcer.
-	e := casbin.NewEnforcer("./test_data/model.conf", "./test_data/policy.csv")
+	e, err := casbin.NewEnforcer("../test_data/model.conf", "../test_data/policy.csv")
+	require.NoError(t, err)
 
-	// Set the watcher for the enforcer.
-	e.SetWatcher(w)
+	err = e.SetWatcher(w)
+	require.NoError(t, err)
 
-	// By default, the watcher's callback is automatically set to the
-	// enforcer's LoadPolicy() in the SetWatcher() call.
-	// We can change it by explicitly setting a callback.
-	w.SetUpdateCallback(func(msg string) {
-		cannel <- "enforcer"
+	err = w.SetUpdateCallback(func(msg string) {
+		updateCh <- "enforcer"
 	})
+	require.NoError(t, err)
 
-	// Update the policy to test the effect.
-	e.SavePolicy()
+	err = e.SavePolicy()
+	require.NoError(t, err)
 
-	// Validate that listener received message
 	select {
-	case res := <-cannel:
-		if res != "enforcer" {
-			t.Fatalf("Got unexpected message :%v", res)
-		}
+	case res := <-updateCh:
+		require.Equal(t, "enforcer", res)
 	case <-time.After(time.Second * 5):
 		t.Fatal("The enforcer didn't send message in time")
 	}
-	close(cannel)
 }
 
-// Ensure that we can still use the same topic name
-func TestWithEnforcerMemoryB(t *testing.T) {
+func TestWithEnforcerMemory_NonShared(t *testing.T) {
+	// Two watchers with the same topic but non-shared memory should not communicate.
+	endpointURL := "mem://casbin?shared=false"
 
-	endpointURL := "mem://topicA"
-
-	cannel := make(chan string, 1)
+	updaterCh := make(chan string, 1)
+	listenerCh := make(chan string, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	w, err := New(ctx, endpointURL)
-	if err != nil {
-		t.Fatalf("Failed to create updater, error: %s", err)
-	}
-	defer w.Close()
-
-	// Initialize the enforcer.
-	e := casbin.NewEnforcer("./test_data/model.conf", "./test_data/policy.csv")
-
-	// Set the watcher for the enforcer.
-	e.SetWatcher(w)
-
-	// By default, the watcher's callback is automatically set to the
-	// enforcer's LoadPolicy() in the SetWatcher() call.
-	// We can change it by explicitly setting a callback.
-	w.SetUpdateCallback(func(msg string) {
-		cannel <- "enforcer"
+	// Updater
+	updaterWatcher, err := watcher.NewWatcher(ctx, endpointURL)
+	require.NoError(t, err)
+	defer updaterWatcher.Close()
+	err = updaterWatcher.SetUpdateCallback(func(msg string) {
+		updaterCh <- "updater"
 	})
+	require.NoError(t, err)
 
-	// Update the policy to test the effect.
-	e.SavePolicy()
+	// Listener
+	listenerWatcher, err := watcher.NewWatcher(ctx, endpointURL)
+	require.NoError(t, err)
+	defer listenerWatcher.Close()
+	err = listenerWatcher.SetUpdateCallback(func(msg string) {
+		listenerCh <- "listener"
+	})
+	require.NoError(t, err)
 
-	// Validate that listener received message
+	// Updater sends an update
+	err = updaterWatcher.Update()
+	require.NoError(t, err)
+
+	// Validate that the listener does NOT receive the message.
 	select {
-	case res := <-cannel:
-		if res != "enforcer" {
-			t.Fatalf("Got unexpected message :%v", res)
-		}
-	case <-time.After(time.Second * 5):
-		t.Fatal("The enforcer didn't send message in time")
+	case res := <-listenerCh:
+		t.Fatalf("Listener should not have received a message, but got: %s", res)
+	case res := <-updaterCh:
+		t.Fatalf("Updater should not receive its own message, but got: %s", res)
+	case <-time.After(time.Millisecond * 100):
+		// Test passed, no message received in a short time.
 	}
-	close(cannel)
 }

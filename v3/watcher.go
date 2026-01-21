@@ -2,146 +2,224 @@ package watcher
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
-	"log"
-	"runtime"
+	"net/url"
 	"sync"
-	"time"
 
+	"github.com/ThreeDotsLabs/watermill"
+	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/casbin/casbin/v3/model"
 	"github.com/casbin/casbin/v3/persist"
-	"gocloud.dev/pubsub"
-
-	_ "gocloud.dev/pubsub/kafkapubsub"
-	_ "gocloud.dev/pubsub/natspubsub"
-	_ "gocloud.dev/pubsub/rabbitpubsub"
 )
 
-// check interface compatibility
-var _ persist.Watcher = &Watcher{}
-
-var (
-	ErrNotConnected = errors.New("pubsub not connected, cannot dispatch update message")
-)
-
-// Watcher implements Casbin updates watcher to synchronize policy changes
-// between the nodes
-type Watcher struct {
-	url          string
+// baseWatcher contains the common logic for both Watcher and WatcherEx.
+type baseWatcher struct {
+	pubsub       PubSub
+	topic        string
 	callbackFunc func(string)
-	connMu       *sync.RWMutex
-	ctx          context.Context
-	topic        *pubsub.Topic
-	sub          *pubsub.Subscription
+	callbackMu   sync.RWMutex
+	closed       chan struct{}
+	logger       watermill.LoggerAdapter
 }
 
-// New creates a new watcher  https://gocloud.dev/concepts/urls/
-// gcppubsub://myproject/mytopic
-func New(ctx context.Context, url string) (*Watcher, error) {
-	w := &Watcher{
-		url:    url,
-		connMu: &sync.RWMutex{},
+// WatcherOption is a functional option for configuring the Watcher.
+type WatcherOption func(*options)
+
+type options struct {
+	Topic  string
+	Logger watermill.LoggerAdapter
+}
+
+// WithTopic sets the Watermill topic to use for updates.
+func WithTopic(topic string) WatcherOption {
+	return func(o *options) {
+		o.Topic = topic
+	}
+}
+
+// WithLogger sets the Watermill logger adapter to use.
+func WithLogger(logger watermill.LoggerAdapter) WatcherOption {
+	return func(o *options) {
+		o.Logger = logger
+	}
+}
+
+// newBaseWatcher creates a new base watcher instance.
+func newBaseWatcher(ctx context.Context, connectionURL string, opts ...WatcherOption) (*baseWatcher, error) {
+	o := &options{
+		Topic:  "casbin-policy-updates",              // Default topic
+		Logger: watermill.NewStdLogger(false, false), // Default logger
+	}
+	for _, opt := range opts {
+		opt(o)
 	}
 
-	runtime.SetFinalizer(w, finalizer)
+	u, err := url.Parse(connectionURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse url: %w", err)
+	}
 
-	err := w.initializeConnections(ctx)
+	driversMu.RLock()
+	driver, ok := drivers[u.Scheme]
+	driversMu.RUnlock()
 
-	return w, err
+	if !ok {
+		return nil, fmt.Errorf("unknown driver scheme: %s", u.Scheme)
+	}
+
+	ps, err := driver.NewPubSub(ctx, u, o.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pubsub for scheme %s: %w", u.Scheme, err)
+	}
+
+	w := &baseWatcher{
+		pubsub: ps,
+		topic:  o.Topic,
+		closed: make(chan struct{}),
+		logger: o.Logger,
+	}
+
+	if err := w.startSubscribe(ctx); err != nil {
+		if closeErr := ps.Close(); closeErr != nil {
+			w.logger.Error("failed to close pubsub", closeErr, nil)
+		}
+		return nil, err
+	}
+
+	return w, nil
 }
 
-// SetUpdateCallback sets the callback function that the watcher will call
-// when the policy in DB has been changed by other instances.
-// A classic callback is Enforcer.LoadPolicy().
-func (w *Watcher) SetUpdateCallback(callbackFunc func(string)) error {
-	w.connMu.Lock()
-	defer w.connMu.Unlock()
-	w.callbackFunc = callbackFunc
-	return nil
-}
-
-func (w *Watcher) initializeConnections(ctx context.Context) error {
-	w.connMu.Lock()
-	defer w.connMu.Unlock()
-	w.ctx = ctx
-	topic, err := pubsub.OpenTopic(ctx, w.url)
+func (w *baseWatcher) startSubscribe(ctx context.Context) error {
+	messages, err := w.pubsub.Subscribe(ctx, w.topic)
 	if err != nil {
 		return err
 	}
-	w.topic = topic
 
-	return w.subscribeToUpdates(ctx)
-}
-
-func (w *Watcher) subscribeToUpdates(ctx context.Context) error {
-	sub, err := pubsub.OpenSubscription(ctx, w.url)
-	if err != nil {
-		return fmt.Errorf("failed to open updates subscription, error: %w", err)
-	}
-	w.sub = sub
 	go func() {
 		for {
-			msg, err := sub.Receive(ctx)
-			if err != nil {
-				if ctx.Err() == context.Canceled {
-					// nothing to do
+			select {
+			case msg, ok := <-messages:
+				if !ok {
 					return
 				}
-				log.Printf("Error while receiving an update message: %s\n", err)
+				w.handleMessage(msg)
+				msg.Ack()
+			case <-w.closed:
 				return
 			}
-			w.executeCallback(msg)
-
-			msg.Ack()
 		}
 	}()
+
 	return nil
 }
 
-func (w *Watcher) executeCallback(msg *pubsub.Message) {
-	w.connMu.RLock()
-	defer w.connMu.RUnlock()
-	if w.callbackFunc != nil {
-		go w.callbackFunc(string(msg.Body))
+func (w *baseWatcher) handleMessage(msg *message.Message) {
+	w.callbackMu.RLock()
+	cb := w.callbackFunc
+	w.callbackMu.RUnlock()
+
+	if cb != nil {
+		cb(string(msg.Payload))
 	}
 }
 
-// Update calls the update callback of other instances to synchronize their policy.
-// It is usually called after changing the policy in DB, like Enforcer.SavePolicy(),
-// Enforcer.AddPolicy(), Enforcer.RemovePolicy(), etc.
-func (w *Watcher) Update() error {
-	w.connMu.RLock()
-	defer w.connMu.RUnlock()
-	if w.topic == nil {
-		return ErrNotConnected
-	}
-	m := &pubsub.Message{Body: []byte("")}
-	return w.topic.Send(w.ctx, m)
+func (w *baseWatcher) SetUpdateCallback(callback func(string)) error {
+	w.callbackMu.Lock()
+	defer w.callbackMu.Unlock()
+	w.callbackFunc = callback
+	return nil
 }
 
-// Close stops and releases the watcher, the callback function will not be called any more.
-func (w *Watcher) Close() {
-	finalizer(w)
+func (w *baseWatcher) Update() error {
+	msg := message.NewMessage(watermill.NewUUID(), []byte("update"))
+	return w.pubsub.Publish(w.topic, msg)
 }
 
-func finalizer(w *Watcher) {
-	w.connMu.Lock()
-	defer w.connMu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if w.topic != nil {
-		w.topic = nil
+func (w *baseWatcher) Close() {
+	close(w.closed)
+	if err := w.pubsub.Close(); err != nil {
+		w.logger.Error("failed to close pubsub", err, nil)
 	}
-
-	if w.sub != nil {
-		err := w.sub.Shutdown(ctx)
-		if err != nil {
-			log.Printf("Subscription shutdown failed, error: %s\n", err)
-		}
-		w.sub = nil
-	}
-
-	w.callbackFunc = nil
 }
+
+// Watcher implements persist.Watcher.
+type Watcher struct {
+	*baseWatcher
+}
+
+// NewWatcher creates a new Watcher (basic mode).
+func NewWatcher(ctx context.Context, connectionURL string, opts ...WatcherOption) (*Watcher, error) {
+	base, err := newBaseWatcher(ctx, connectionURL, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &Watcher{baseWatcher: base}, nil
+}
+
+// WatcherEx implements persist.WatcherEx.
+type WatcherEx struct {
+	*baseWatcher
+}
+
+// NewWatcherEx creates a new WatcherEx (extended mode).
+func NewWatcherEx(ctx context.Context, connectionURL string, opts ...WatcherOption) (*WatcherEx, error) {
+	base, err := newBaseWatcher(ctx, connectionURL, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &WatcherEx{baseWatcher: base}, nil
+}
+
+// UpdateMessage represents the payload for WatcherEx updates.
+type UpdateMessage struct {
+	Type   string     `json:"type"`
+	Sec    string     `json:"sec"`
+	Ptype  string     `json:"ptype"`
+	Params []string   `json:"params,omitempty"`
+	Rules  [][]string `json:"rules,omitempty"`
+}
+
+func (w *WatcherEx) publishUpdate(u UpdateMessage) error {
+	payload, err := json.Marshal(u)
+	if err != nil {
+		return err
+	}
+	msg := message.NewMessage(watermill.NewUUID(), payload)
+	return w.pubsub.Publish(w.topic, msg)
+}
+
+func (w *WatcherEx) UpdateForAddPolicy(sec, ptype string, params ...string) error {
+	return w.publishUpdate(UpdateMessage{Type: "add-policy", Sec: sec, Ptype: ptype, Params: params})
+}
+
+func (w *WatcherEx) UpdateForRemovePolicy(sec, ptype string, params ...string) error {
+	return w.publishUpdate(UpdateMessage{Type: "remove-policy", Sec: sec, Ptype: ptype, Params: params})
+}
+
+func (w *WatcherEx) UpdateForRemoveFilteredPolicy(sec, ptype string, fieldIndex int, fieldValues ...string) error {
+	return w.publishUpdate(UpdateMessage{
+		Type:   "remove-filtered-policy",
+		Sec:    sec,
+		Ptype:  ptype,
+		Params: append([]string{fmt.Sprintf("%d", fieldIndex)}, fieldValues...),
+	})
+}
+
+func (w *WatcherEx) UpdateForSavePolicy(m model.Model) error {
+	// Note: Sending the full model might be inefficient.
+	// Consider sending a version or timestamp instead if the model is large.
+	return w.publishUpdate(UpdateMessage{Type: "save-policy"})
+}
+
+func (w *WatcherEx) UpdateForAddPolicies(sec string, ptype string, rules ...[]string) error {
+	return w.publishUpdate(UpdateMessage{Type: "add-policies", Sec: sec, Ptype: ptype, Rules: rules})
+}
+
+func (w *WatcherEx) UpdateForRemovePolicies(sec string, ptype string, rules ...[]string) error {
+	return w.publishUpdate(UpdateMessage{Type: "remove-policies", Sec: sec, Ptype: ptype, Rules: rules})
+}
+
+// Ensure interfaces are implemented
+var _ persist.Watcher = &Watcher{}
+var _ persist.WatcherEx = &WatcherEx{}

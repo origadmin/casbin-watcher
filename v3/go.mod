@@ -1,15 +1,11 @@
 module github.com/origadmin/casbin-watcher/v3
 
-go 1.24.0
+go 1.24.4
 
 require (
 	github.com/casbin/casbin/v3 v3.9.0
 	github.com/nats-io/nats-server/v2 v2.12.3
 	github.com/nats-io/nats.go v1.48.0
-	gocloud.dev v0.44.0
-	gocloud.dev/pubsub/kafkapubsub v0.44.0
-	gocloud.dev/pubsub/natspubsub v0.44.0
-	gocloud.dev/pubsub/rabbitpubsub v0.44.0
 )
 
 require (
@@ -28,6 +24,10 @@ require (
 	github.com/Azure/go-amqp v1.4.0 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.4.2 // indirect
 	github.com/IBM/sarama v1.45.2 // indirect
+	github.com/ThreeDotsLabs/watermill-amqp v1.1.4 // indirect
+	github.com/ThreeDotsLabs/watermill-aws v1.0.1 // indirect
+	github.com/ThreeDotsLabs/watermill-googlecloud v1.2.6 // indirect
+	github.com/ThreeDotsLabs/watermill-sql v1.4.0 // indirect
 	github.com/antithesishq/antithesis-sdk-go v0.5.0-default-no-op // indirect
 	github.com/aws/aws-sdk-go-v2 v1.39.6 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.31.17 // indirect
@@ -38,8 +38,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.13 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sns v1.34.7 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sqs v1.38.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sns v1.37.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.30.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.39.1 // indirect
@@ -72,7 +72,6 @@ require (
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
 	github.com/klauspost/compress v1.18.2 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/minio/highwayhash v1.0.4-0.20251030100505-070ab1a87a76 // indirect
 	github.com/nats-io/jwt/v2 v2.8.0 // indirect
 	github.com/nats-io/nkeys v0.4.12 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
