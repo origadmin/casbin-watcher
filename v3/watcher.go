@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/ThreeDotsLabs/watermill"
@@ -23,8 +24,8 @@ type baseWatcher struct {
 	logger       watermill.LoggerAdapter
 }
 
-// WatcherOption is a functional option for configuring the Watcher.
-type WatcherOption func(*options)
+// Option is a functional option for configuring the Watcher.
+type Option func(*options)
 
 type options struct {
 	Topic  string
@@ -32,32 +33,39 @@ type options struct {
 }
 
 // WithTopic sets the Watermill topic to use for updates.
-func WithTopic(topic string) WatcherOption {
+func WithTopic(topic string) Option {
 	return func(o *options) {
 		o.Topic = topic
 	}
 }
 
 // WithLogger sets the Watermill logger adapter to use.
-func WithLogger(logger watermill.LoggerAdapter) WatcherOption {
+func WithLogger(logger watermill.LoggerAdapter) Option {
 	return func(o *options) {
 		o.Logger = logger
 	}
 }
 
 // newBaseWatcher creates a new base watcher instance.
-func newBaseWatcher(ctx context.Context, connectionURL string, opts ...WatcherOption) (*baseWatcher, error) {
+func newBaseWatcher(ctx context.Context, connectionURL string, opts ...Option) (*baseWatcher, error) {
 	o := &options{
 		Topic:  "casbin-policy-updates",              // Default topic
 		Logger: watermill.NewStdLogger(false, false), // Default logger
-	}
-	for _, opt := range opts {
-		opt(o)
 	}
 
 	u, err := url.Parse(connectionURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse url: %w", err)
+	}
+
+	// Priority 2: URL Path overrides default topic
+	if u.Path != "" && u.Path != "/" {
+		o.Topic = strings.TrimPrefix(u.Path, "/")
+	}
+
+	// Priority 3: Functional options override URL Path and default topic
+	for _, opt := range opts {
+		opt(o)
 	}
 
 	driversMu.RLock()
@@ -116,12 +124,20 @@ func (w *baseWatcher) startSubscribe(ctx context.Context) error {
 
 func (w *baseWatcher) handleMessage(msg *message.Message) {
 	w.callbackMu.RLock()
-	cb := w.callbackFunc
+	callback := w.callbackFunc
 	w.callbackMu.RUnlock()
 
-	if cb != nil {
-		cb(string(msg.Payload))
+	if callback == nil {
+		return
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			w.logger.Error("panic in watcher callback", nil, watermill.LogFields{"panic": r})
+		}
+	}()
+
+	callback(string(msg.Payload))
 }
 
 func (w *baseWatcher) SetUpdateCallback(callback func(string)) error {
@@ -149,7 +165,7 @@ type Watcher struct {
 }
 
 // NewWatcher creates a new Watcher (basic mode).
-func NewWatcher(ctx context.Context, connectionURL string, opts ...WatcherOption) (*Watcher, error) {
+func NewWatcher(ctx context.Context, connectionURL string, opts ...Option) (*Watcher, error) {
 	base, err := newBaseWatcher(ctx, connectionURL, opts...)
 	if err != nil {
 		return nil, err
@@ -163,7 +179,7 @@ type WatcherEx struct {
 }
 
 // NewWatcherEx creates a new WatcherEx (extended mode).
-func NewWatcherEx(ctx context.Context, connectionURL string, opts ...WatcherOption) (*WatcherEx, error) {
+func NewWatcherEx(ctx context.Context, connectionURL string, opts ...Option) (*WatcherEx, error) {
 	base, err := newBaseWatcher(ctx, connectionURL, opts...)
 	if err != nil {
 		return nil, err
@@ -206,9 +222,12 @@ func (w *WatcherEx) UpdateForRemoveFilteredPolicy(sec, ptype string, fieldIndex 
 	})
 }
 
-func (w *WatcherEx) UpdateForSavePolicy(m model.Model) error {
-	// Note: Sending the full model might be inefficient.
-	// Consider sending a version or timestamp instead if the model is large.
+// UpdateForSavePolicy is called when the policy is saved.
+// This implementation sends a generic "save-policy" update notification.
+// It does not send the full model to avoid large message payloads.
+// The receiving Casbin enforcer is expected to reload the entire policy from the
+// persistence layer (e.g., database) upon receiving this notification.
+func (w *WatcherEx) UpdateForSavePolicy(_ model.Model) error {
 	return w.publishUpdate(UpdateMessage{Type: "save-policy"})
 }
 
