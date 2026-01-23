@@ -4,13 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-
-	"go.uber.org/multierr"
+	"strconv"
+	"time"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-aws/sqs"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"go.uber.org/multierr"
 
 	"github.com/origadmin/casbin-watcher/v3"
 )
@@ -37,9 +40,18 @@ func (d *SQSDriver) NewPubSub(ctx context.Context, u *url.URL, logger watermill.
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
+	var marshalerUnmarshaler sqs.MarshalerUnmarshaler
+	switch config.Marshaler {
+	case "json":
+		marshalerUnmarshaler = &sqs.JSONMarshaler{}
+	default: // "default"
+		marshalerUnmarshaler = &sqs.DefaultMarshaler{}
+	}
+
 	publisher, err := sqs.NewPublisher(
 		sqs.PublisherConfig{
 			AWSConfig: awsCfg,
+			Marshaler: marshalerUnmarshaler,
 		},
 		logger,
 	)
@@ -49,7 +61,15 @@ func (d *SQSDriver) NewPubSub(ctx context.Context, u *url.URL, logger watermill.
 
 	subscriber, err := sqs.NewSubscriber(
 		sqs.SubscriberConfig{
-			AWSConfig: awsCfg,
+			AWSConfig:    awsCfg,
+			Unmarshaler:  marshalerUnmarshaler,
+			CloseTimeout: config.CloseTimeout,
+			ReceiveMessageParams: &types.ReceiveMessageInput{
+				WaitTimeSeconds:       int32(config.WaitTimeSeconds),
+				VisibilityTimeout:     int32(config.VisibilityTimeout),
+				MaxNumberOfMessages:   10, // A reasonable default for batching
+				MessageAttributeNames: []string{"All"},
+			},
 		},
 		logger,
 	)
@@ -86,12 +106,22 @@ func (s *sqsOnlyPubSub) Close() error {
 }
 
 type sqsOnlyConfig struct {
-	Region   string
-	QueueURL string
+	Region            string
+	QueueURL          string
+	Marshaler         string
+	WaitTimeSeconds   int
+	VisibilityTimeout int
+	CloseTimeout      time.Duration
 }
 
 func parseSqsOnlyURL(u *url.URL) (*sqsOnlyConfig, error) {
-	config := &sqsOnlyConfig{}
+	config := &sqsOnlyConfig{
+		// Set robust defaults
+		Marshaler:         "default",
+		WaitTimeSeconds:   20, // Enable long polling by default
+		VisibilityTimeout: 30, // Default visibility timeout
+		CloseTimeout:      30 * time.Second,
+	}
 
 	if region := u.Query().Get("region"); region != "" {
 		config.Region = region
@@ -103,6 +133,31 @@ func parseSqsOnlyURL(u *url.URL) (*sqsOnlyConfig, error) {
 		return nil, fmt.Errorf("sqs queue url is not specified in URL host")
 	}
 	config.QueueURL = "https://" + u.Host + u.Path
+
+	if m := u.Query().Get("marshaler"); m != "" {
+		config.Marshaler = m
+	}
+	if wt := u.Query().Get("wait_time_seconds"); wt != "" {
+		val, err := strconv.Atoi(wt)
+		if err != nil {
+			return nil, fmt.Errorf("invalid 'wait_time_seconds' param: %w", err)
+		}
+		config.WaitTimeSeconds = val
+	}
+	if vt := u.Query().Get("visibility_timeout"); vt != "" {
+		val, err := strconv.Atoi(vt)
+		if err != nil {
+			return nil, fmt.Errorf("invalid 'visibility_timeout' param: %w", err)
+		}
+		config.VisibilityTimeout = val
+	}
+	if ct := u.Query().Get("close_timeout"); ct != "" {
+		val, err := time.ParseDuration(ct)
+		if err != nil {
+			return nil, fmt.Errorf("invalid 'close_timeout' param: %w", err)
+		}
+		config.CloseTimeout = val
+	}
 
 	return config, nil
 }

@@ -27,16 +27,16 @@ import (
 "github.com/casbin/casbin/v3"
 "github.com/origadmin/casbin-watcher/v3"
 // Import the specific driver you want to use
-_ "github.com/origadmin/casbin-watcher/v3/drivers/redis"
+_ "github.com/origadmin/casbin-watcher/v3/drivers/redisstream"
 )
 
 func main() {
 // The connection URL for the desired driver.
 // See "Driver Configuration" section for details.
-connectionURL := "redis://localhost:6379/0"
+connectionURL := "redisstream://localhost:6379/0"
 
 // Create a new watcher.
-w, err := watcher.NewWatcher(context.Background(), connectionURL)
+w, err := watcher.NewWatcher(context.Background(), connectionURL, "casbin_updates")
 if err != nil {
 log.Fatalf("Failed to create watcher: %v", err)
 }
@@ -57,6 +57,15 @@ log.Fatalf("Failed to set watcher: %v", err)
 // For example, after e.SavePolicy() or e.AddPolicy(), etc.
 }
 ```
+
+## Available Drivers
+
+| Driver Name       | Scheme           | Underlying Watermill Package                                     |
+|-------------------|------------------|------------------------------------------------------------------|
+| **etcd**          | `etcd://`        | Custom implementation (using `go.etcd.io/etcd/client/v3`)        |
+| **In-Memory**     | `mem://`         | `github.com/ThreeDotsLabs/watermill/pubsub/gochannel`            |
+| **RabbitMQ**      | `rabbitmq://`    | `github.com/ThreeDotsLabs/watermill-amqp/v2/pkg/amqp`            |
+| **Redis Streams** | `redisstream://` | `github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream` |
 
 ## Driver Configuration
 

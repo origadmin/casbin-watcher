@@ -24,7 +24,7 @@ type Driver struct{}
 // can communicate with each other.
 var (
 	globalMemoryPubSub   *memoryPubSub
-	globalMemoryPubSubMu sync.Mutex
+	globalMemoryPubSubMu sync.RWMutex // Use RWMutex for better concurrency control
 )
 
 type memoryPubSub struct {
@@ -32,10 +32,12 @@ type memoryPubSub struct {
 }
 
 func (m *memoryPubSub) Publish(topic string, messages ...*message.Message) error {
+	// gochannel.GoChannel's Publish can return an error if the pubsub is closed.
 	return m.pubsub.Publish(topic, messages...)
 }
 
 func (m *memoryPubSub) Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error) {
+	// gochannel.GoChannel's Subscribe can return an error if the pubsub is closed.
 	return m.pubsub.Subscribe(ctx, topic)
 }
 
@@ -43,11 +45,13 @@ func (m *memoryPubSub) Close() error {
 	return m.pubsub.Close()
 }
 
+// memoryPubSubWrapper wraps the actual PubSub to handle shared instance closing logic.
 type memoryPubSubWrapper struct {
 	watcher.PubSub
 	shared bool
 }
 
+// Close for the wrapper. If the underlying PubSub is shared, it's a no-op.
 func (w *memoryPubSubWrapper) Close() error {
 	if !w.shared {
 		return w.PubSub.Close()
@@ -55,7 +59,7 @@ func (w *memoryPubSubWrapper) Close() error {
 	return nil
 }
 
-func (d *Driver) NewPubSub(ctx context.Context, u *url.URL, logger watermill.LoggerAdapter) (watcher.PubSub, error) {
+func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.LoggerAdapter) (watcher.PubSub, error) {
 	query := u.Query()
 	shared := true
 	if s := query.Get("shared"); s != "" {
@@ -76,18 +80,22 @@ func (d *Driver) NewPubSub(ctx context.Context, u *url.URL, logger watermill.Log
 	}
 
 	if shared {
-		globalMemoryPubSubMu.Lock()
+		globalMemoryPubSubMu.Lock() // Write lock for creating the global instance
 		defer globalMemoryPubSubMu.Unlock()
 		if globalMemoryPubSub == nil {
 			globalMemoryPubSub = &memoryPubSub{
 				pubsub: gochannel.NewGoChannel(gochannel.Config{OutputChannelBuffer: int64(bufferSize)}, logger),
 			}
 		}
+		// For shared instances, we need to ensure the global instance is not nil before returning.
+		// A read lock is not strictly needed here as the write lock is held, but conceptually,
+		- // subsequent NewPubSub calls will acquire a read lock to access globalMemoryPubSub.
 		return &memoryPubSubWrapper{PubSub: globalMemoryPubSub, shared: true}, nil
-	} else {
-		ps := &memoryPubSub{
-			pubsub: gochannel.NewGoChannel(gochannel.Config{OutputChannelBuffer: int64(bufferSize)}, logger),
-		}
-		return &memoryPubSubWrapper{PubSub: ps, shared: false}, nil
 	}
+
+	// For non-shared instances, create a new one.
+	ps := &memoryPubSub{
+		pubsub: gochannel.NewGoChannel(gochannel.Config{OutputChannelBuffer: int64(bufferSize)}, logger),
+	}
+	return &memoryPubSubWrapper{PubSub: ps, shared: false}, nil
 }

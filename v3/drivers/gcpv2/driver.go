@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 
+	"cloud.google.com/go/pubsub"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-googlecloud/pkg/googlecloud"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"go.uber.org/multierr"
 
-	"github.com/origadmin/casbin-watcher/v3"
+	watcher "github.com/origadmin/casbin-watcher/v3"
 )
 
 func init() {
@@ -30,6 +32,7 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 	publisher, err := googlecloud.NewPublisher(
 		googlecloud.PublisherConfig{
 			ProjectID: config.ProjectID,
+			// Add future publisher settings here if needed, e.g., PublishSettings
 		},
 		logger,
 	)
@@ -40,8 +43,19 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 	subscriber, err := googlecloud.NewSubscriber(
 		googlecloud.SubscriberConfig{
 			ProjectID: config.ProjectID,
-			// GenerateSubscriptionName will use the topic name as the subscription name by default.
-			Unmarshaler: googlecloud.DefaultMarshalerUnmarshaler{},
+			GenerateSubscriptionName: func(topic string) string {
+				if config.SubscriptionName != "" {
+					return config.SubscriptionName
+				}
+				// Default behavior: use the topic name as the subscription name.
+				return topic
+			},
+			Unmarshaler: googlecloud.DefaultMarshalerUnmarshaler{}, // This assignment is correct.
+			ReceiveSettings: pubsub.ReceiveSettings{
+				MaxOutstandingMessages: config.MaxOutstandingMessages,
+				NumGoroutines:          config.NumGoroutines,
+			},
+			// CloseTimeout is not a field in watermill-googlecloud's SubscriberConfig.
 		},
 		logger,
 	)
@@ -60,7 +74,7 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 
 type gcpPubSub struct {
 	publisher  *googlecloud.Publisher
-	subscriber *googlecloud.Subscriber // Corrected type
+	subscriber *googlecloud.Subscriber
 }
 
 func (g *gcpPubSub) Publish(topic string, messages ...*message.Message) error {
@@ -76,22 +90,41 @@ func (g *gcpPubSub) Close() error {
 }
 
 type gcpConfig struct {
-	ProjectID string
-	// SubscriptionID is not directly used in the config, as GenerateSubscriptionName handles it.
-	// Keeping it in parseGcpURL for potential future use or custom generation.
+	ProjectID              string
+	SubscriptionName       string
+	MaxOutstandingMessages int
+	NumGoroutines          int
+	// CloseTimeout is not supported by watermill-googlecloud's SubscriberConfig.
 }
 
 func parseGcpURL(u *url.URL) (*gcpConfig, error) {
-	config := &gcpConfig{}
-
 	if u.Host == "" {
 		return nil, fmt.Errorf("gcp project id is not specified in URL host")
 	}
-	config.ProjectID = u.Host
 
-	// The topic is not needed for configuration, it's passed directly to Publish/Subscribe methods.
-	// The subscription ID is handled by GenerateSubscriptionName in SubscriberConfig.
-	// If a custom subscription name is needed, it can be parsed here and passed to GenerateSubscriptionName.
+	query := u.Query()
+	config := &gcpConfig{
+		ProjectID:        u.Host,
+		SubscriptionName: query.Get("subscription_name"),
+		// Set robust defaults for ReceiveSettings
+		MaxOutstandingMessages: 100,
+		NumGoroutines:          10,
+	}
+
+	if mom := query.Get("max_outstanding_messages"); mom != "" {
+		val, err := strconv.Atoi(mom)
+		if err != nil {
+			return nil, fmt.Errorf("invalid 'max_outstanding_messages' param: %w", err)
+		}
+		config.MaxOutstandingMessages = val
+	}
+	if ng := query.Get("num_goroutines"); ng != "" {
+		val, err := strconv.Atoi(ng)
+		if err != nil {
+			return nil, fmt.Errorf("invalid 'num_goroutines' param: %w", err)
+		}
+		config.NumGoroutines = val
+	}
 
 	return config, nil
 }
