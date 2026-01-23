@@ -15,20 +15,20 @@ import (
 	"go.uber.org/multierr"
 
 	"github.com/origadmin/casbin-watcher/v3"
-	_ "github.com/sqlite3ent/sqlite3"
 )
 
 func init() {
 	watcher.RegisterDriver("mysql", &Driver{dbType: "mysql"})
 	watcher.RegisterDriver("postgres", &Driver{dbType: "postgres"})
-	watcher.RegisterDriver("mariadb", &Driver{dbType: "mysql"})
-	watcher.RegisterDriver("sqlite3", &Driver{dbType: "sqlite3"})
+	watcher.RegisterDriver("mariadb", &Driver{dbType: "mysql"}) // MariaDB uses the MySQL driver
 }
 
+// Driver handles SQL-based Pub/Sub for MySQL and PostgreSQL.
 type Driver struct {
 	dbType string
 }
 
+// NewPubSub creates a new Pub/Sub for the configured SQL database.
 func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.LoggerAdapter) (watcher.PubSub, error) {
 	dsn, err := parseSQLURL(u, d.dbType)
 	if err != nil {
@@ -40,10 +40,7 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 		return nil, fmt.Errorf("failed to open sql database: %w", err)
 	}
 	if err := db.Ping(); err != nil {
-		// If ping fails, ensure the db connection is closed.
-		if closeErr := db.Close(); closeErr != nil {
-			logger.Error("failed to close SQL db after ping failed", closeErr, nil)
-		}
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to connect to sql database: %w", err)
 	}
 
@@ -52,18 +49,16 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 	case "mysql":
 		schemaAdapter = watermillsql.DefaultMySQLSchema{
 			GenerateMessagesTableName: func(topic string) string {
+				// Use backticks for MySQL to avoid issues with reserved keywords
 				return fmt.Sprintf("`watermill_%s`", topic)
 			},
 		}
 	case "postgres":
 		schemaAdapter = watermillsql.DefaultPostgreSQLSchema{}
 	default:
-		// This case should ideally not be reached due to the init function,
-		// but it's good practice to handle it.
-		if closeErr := db.Close(); closeErr != nil {
-			logger.Error("failed to close SQL db for unknown db type", closeErr, nil)
-		}
-		return nil, fmt.Errorf("unknown db type: %s", d.dbType)
+		// This case should not be reached due to the init function.
+		_ = db.Close()
+		return nil, fmt.Errorf("unsupported db type: %s", d.dbType)
 	}
 
 	publisher, err := watermillsql.NewPublisher(
@@ -74,9 +69,7 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 		logger,
 	)
 	if err != nil {
-		if closeErr := db.Close(); closeErr != nil {
-			logger.Error("failed to close SQL db after publisher creation failed", closeErr, nil)
-		}
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to create sql publisher: %w", err)
 	}
 
@@ -91,12 +84,8 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 		logger,
 	)
 	if err != nil {
-		if closeErr := publisher.Close(); closeErr != nil {
-			logger.Error("failed to close SQL publisher after subscriber creation failed", closeErr, nil)
-		}
-		if closeErr := db.Close(); closeErr != nil {
-			logger.Error("failed to close SQL db after subscriber creation failed", closeErr, nil)
-		}
+		_ = publisher.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to create sql subscriber: %w", err)
 	}
 
