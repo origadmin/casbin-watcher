@@ -27,13 +27,13 @@ import (
 "github.com/casbin/casbin/v3"
 "github.com/origadmin/casbin-watcher/v3"
 // Import the specific driver you want to use
-_ "github.com/origadmin/casbin-watcher/v3/drivers/redisstream"
+_ "github.com/origadmin/casbin-watcher/v3/drivers/nats"
 )
 
 func main() {
 // The connection URL for the desired driver.
-// See "Driver Configuration" section for details.
-connectionURL := "redisstream://localhost:6379/0"
+// See the driver's README for configuration details.
+connectionURL := "nats://localhost:4222/casbin_updates"
 
 // Create a new watcher.
 w, err := watcher.NewWatcher(context.Background(), connectionURL, "casbin_updates")
@@ -58,98 +58,37 @@ log.Fatalf("Failed to set watcher: %v", err)
 }
 ```
 
-## Available Drivers
+## Supported Drivers
 
-| Driver Name       | Scheme           | Underlying Watermill Package                                     |
-|-------------------|------------------|------------------------------------------------------------------|
-| **etcd**          | `etcd://`        | Custom implementation (using `go.etcd.io/etcd/client/v3`)        |
-| **In-Memory**     | `mem://`         | `github.com/ThreeDotsLabs/watermill/pubsub/gochannel`            |
-| **RabbitMQ**      | `rabbitmq://`    | `github.com/ThreeDotsLabs/watermill-amqp/v2/pkg/amqp`            |
-| **Redis Streams** | `redisstream://` | `github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream` |
+This section lists all Watermill Pub/Sub backends, indicating their implementation status within this `casbin-watcher`
+repository.
 
-## Driver Configuration
-
-The `connectionURL` format is `scheme://<host>/<path>?<query_params>`. The scheme determines which driver is used.
-
-### In-Memory (`mem`)
-
-Ideal for testing and development.
-
-- **Scheme:** `mem://`
-- **Format:** `mem://<topic>?shared=<true|false>`
-- **Example:** `mem://casbin-updates?shared=true`
-- **Parameters:**
-    - `shared`: (Optional) `true` (default) makes all watchers share the same in-memory pub/sub instance. `false`
-      creates a new, isolated instance for each watcher.
-
-### NATS (`nats`)
-
-- **Scheme:** `nats://`
-- **Format:** `nats://<host>:<port>/<topic>?channel=<channel_name>[&jetstream=true]`
-- **Example:** `nats://localhost:4222/casbin-updates?channel=my-channel&jetstream=true`
-- **Parameters:**
-    - `channel`: (Required) The NSQ channel name.
-    - `jetstream`: (Optional) Set to `true` to enable JetStream support.
-
-### Redis (`redis`)
-
-Uses Redis Streams.
-
-- **Scheme:** `redis://`
-- **Format:** `redis://<user>:<password>@<host>:<port>/<db_number>?pool_size=<size>`
-- **Example:** `redis://:mypassword@localhost:6379/0?pool_size=10`
-- **Parameters:**
-    - `<db_number>`: (Optional) The Redis database number. Defaults to 0.
-    - `pool_size`: (Optional) The connection pool size.
-
-### SQL (`postgres`, `mysql`, `mariadb`)
-
-Uses a database table as a message queue.
-
-- **PostgreSQL:**
-    - **Scheme:** `postgres://`
-    - **Format:** `postgres://<user>:<password>@<host>:<port>/<dbname>?sslmode=disable`
-- **MySQL / MariaDB:**
-    - **Scheme:** `mysql://` or `mariadb://`
-    - **Format:** `mysql://<user>:<password>@<host>:<port>/<dbname>?<options>`
-
-### Kafka (`kafka`)
-
-- **Scheme:** `kafka://`
-- **Format:** `kafka://<broker1_host>:<port>,<broker2_host>:<port>/<topic>?consumer_group=<group_name>`
-- **Example:** `kafka://localhost:9092/casbin-updates?consumer_group=casbin-group`
-- **Parameters:**
-    - `consumer_group`: (Required) The Kafka consumer group name.
-
-### AWS SQS-Only (`sqs`)
-
-Uses SQS for both publishing and subscribing (point-to-point).
-
-- **Scheme:** `sqs://`
-- **Format:** `sqs://<queue_host>/<account_id>/<queue_name>?region=<region>`
-- **Example:** `sqs://sqs.us-east-1.amazonaws.com/123456789012/my-casbin-queue?region=us-east-1`
-- **Parameters:**
-    - `region`: (Required) The AWS region.
-
-### AWS SNS+SQS (`snssqs`)
-
-Uses SNS for publishing and SQS for subscribing (standard pub/sub).
-
-- **Scheme:** `snssqs://`
-- **Format:** `snssqs://<queue_host>/<account_id>/<queue_name>?region=<region>&topic_arn=<your_topic_arn>`
-- **Example:**
-  `snssqs://sqs.us-east-1.amazonaws.com/123456789012/my-casbin-queue?region=us-east-1&topic_arn=arn:aws:sns:us-east-1:123456789012:my-casbin-topic`
-- **Parameters:**
-    - `region`: (Required) The AWS region.
-    - `topic_arn`: (Required) The full ARN of the SNS topic to publish to.
-
-### Google Cloud Pub/Sub (`gcpv2`)
-
-- **Scheme:** `gcpv2://`
-- **Format:** `gcpv2://<project_id>?subscription=<subscription_name>`
-- **Example:** `gcpv2://my-gcp-project?subscription=casbin-sub`
-- **Parameters:**
-    - `subscription`: (Required) The name of the Pub/Sub subscription. The driver will create it if it doesn't exist.
+| Driver Name                                 | Scheme(s)                 | Underlying Watermill Package                                     | Status          |
+|---------------------------------------------|---------------------------|------------------------------------------------------------------|-----------------|
+| [**AWS (SQS/SNS)**](./drivers/aws)          | `sqs://`, `snssqs://`     | `github.com/ThreeDotsLabs/watermill-aws`                         | Implemented     |
+| [**BoltDB**](./drivers/bolt)                | `bolt://`                 | `github.com/ThreeDotsLabs/watermill-bolt`                        | Implemented     |
+| [**etcd**](./drivers/etcd)                  | `etcd://`                 | Custom implementation (using `go.etcd.io/etcd/client/v3`)        | Implemented     |
+| [**Firestore**](./drivers/firestore)        | `firestore://`            | `github.com/ThreeDotsLabs/watermill-firestore`                   | Implemented     |
+| [**Google Cloud Pub/Sub**](./drivers/gcpv2) | `gcpv2://`                | `github.com/ThreeDotsLabs/watermill-googlecloud/v2`              | Implemented     |
+| [**HTTP**](./drivers/http)                  | `http://`                 | `github.com/ThreeDotsLabs/watermill-http/v2`                     | Implemented     |
+| [**IO (Stdin/Stdout/File)**](./drivers/io)  | `io://`                   | `github.com/ThreeDotsLabs/watermill-io`                          | Implemented     |
+| [**Kafka**](./drivers/kafka)                | `kafka://`                | `github.com/ThreeDotsLabs/watermill-kafka/v3`                    | Implemented     |
+| [**NATS**](./drivers/nats)                  | `nats://`                 | `github.com/ThreeDotsLabs/watermill-nats/v2`                     | Implemented     |
+| [**RabbitMQ**](./drivers/rabbitmq)          | `rabbitmq://`             | `github.com/ThreeDotsLabs/watermill-amqp/v2/pkg/amqp`            | Implemented     |
+| [**Redis Streams**](./drivers/redisstream)  | `redisstream://`          | `github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream` | Implemented     |
+| [**SQL (PostgreSQL/MySQL)**](./drivers/sql) | `postgres://`, `mysql://` | `github.com/ThreeDotsLabs/watermill-sql/v4`                      | Implemented     |
+| [**SQLite (modernc)**](./drivers/sqlite)    | `sqlite://`               | `github.com/ThreeDotsLabs/watermill-sqlite/wmsqlitemodernc`      | Implemented     |
+| **AMQP 1.0**                                | `amqp10://`               | `github.com/kahowell/watermill-amqp10`                           | Not Implemented |
+| **Apache Pulsar**                           | `pulsar://`               | `github.com/AlexCuse/watermill-pulsar`                           | Not Implemented |
+| **Apache RocketMQ**                         | `rocketmq://`             | `github.com/yflau/watermill-rocketmq`                            | Not Implemented |
+| **CockroachDB**                             | `cockroachdb://`          | `github.com/cockroachdb/watermill-crdb`                          | Not Implemented |
+| **Ensign**                                  | `ensign://`               | `github.com/rotationalio/watermill-ensign`                       | Not Implemented |
+| **Google Cloud (HTTP Push)**                | `gcp-http-push://`        | `github.com/dentech-floss/watermill-googlecloud-http`            | Not Implemented |
+| **MongoDB**                                 | `mongodb://`              | `github.com/cunyat/watermill-mongodb`                            | Not Implemented |
+| **MQTT**                                    | `mqtt://`                 | `github.com/perfect13/watermill-mqtt`                            | Not Implemented |
+| **NSQ**                                     | `nsq://`                  | `github.com/chennqqi/watermill-nsq`                              | Not Implemented |
+| **Redis (ZSET)**                            | `rediszset://`            | `github.com/stong1994/watermill-rediszset`                       | Not Implemented |
+| **SQLite (zombiezen)**                      | `sqlite-zombiezen://`     | `github.com/ThreeDotsLabs/watermill-sqlite/wmsqlitezombiezen`    | Not Implemented |
 
 ## WatcherEx
 

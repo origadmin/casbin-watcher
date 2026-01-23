@@ -41,7 +41,7 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 	publisher, err := kafka.NewPublisher(
 		kafka.PublisherConfig{
 			Brokers:               config.Brokers,
-			Marshaler: marshalerUnmarshaler,
+			Marshaler:             marshalerUnmarshaler,
 			OverwriteSaramaConfig: config.SaramaConfig,
 		},
 		logger,
@@ -53,7 +53,7 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 	subscriber, err := kafka.NewSubscriber(
 		kafka.SubscriberConfig{
 			Brokers:               config.Brokers,
-			Unmarshaler: marshalerUnmarshaler, // Use the same marshaler for unmarshaling
+			Unmarshaler:           marshalerUnmarshaler, // Use the same marshaler for unmarshaling
 			OverwriteSaramaConfig: config.SaramaConfig,
 			ConsumerGroup:         config.ConsumerGroup,
 			// CloseTimeout is not a field in watermill-kafka's SubscriberConfig.

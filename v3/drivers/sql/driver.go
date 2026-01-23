@@ -2,68 +2,56 @@ package sql
 
 import (
 	"context"
-	"database/sql"
+	stdSQL "database/sql"
 	"fmt"
 	"net/url"
-	"time"
 
-	"github.com/ThreeDotsLabs/watermill"
-	watermillsql "github.com/ThreeDotsLabs/watermill-sql/pkg/sql"
-	"github.com/ThreeDotsLabs/watermill/message"
+	// Import SQL drivers for side effects
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
+
+	"github.com/ThreeDotsLabs/watermill"
+	"github.com/ThreeDotsLabs/watermill-sql/v4/pkg/sql"
+	"github.com/ThreeDotsLabs/watermill/message"
 	"go.uber.org/multierr"
 
 	"github.com/origadmin/casbin-watcher/v3"
 )
 
 func init() {
-	watcher.RegisterDriver("mysql", &Driver{dbType: "mysql"})
-	watcher.RegisterDriver("postgres", &Driver{dbType: "postgres"})
-	watcher.RegisterDriver("mariadb", &Driver{dbType: "mysql"}) // MariaDB uses the MySQL driver
+	watcher.RegisterDriver("postgres", &Driver{})
+	watcher.RegisterDriver("mysql", &Driver{})
+	watcher.RegisterDriver("mariadb", &Driver{})
+
 }
 
-// Driver handles SQL-based Pub/Sub for MySQL and PostgreSQL.
-type Driver struct {
-	dbType string
-}
+// Driver implements the watcher.Driver interface for SQL databases.
+type Driver struct{}
 
-// NewPubSub creates a new Pub/Sub for the configured SQL database.
+// NewPubSub creates a new PubSub for SQL.
 func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.LoggerAdapter) (watcher.PubSub, error) {
-	dsn, err := parseSQLURL(u, d.dbType)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse sql url: %w", err)
+	// The URL scheme is the SQL driver name (e.g., "mysql", "postgres").
+	if u.Scheme == "mariadb" {
+		u.Scheme = "mysql"
 	}
-
-	db, err := sql.Open(d.dbType, dsn)
+	db, err := stdSQL.Open(u.Scheme, u.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sql database: %w", err)
 	}
+
+	// Ping the database to ensure the connection is valid.
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to connect to sql database: %w", err)
 	}
 
-	var schemaAdapter watermillsql.SchemaAdapter
-	switch d.dbType {
-	case "mysql":
-		schemaAdapter = watermillsql.DefaultMySQLSchema{
-			GenerateMessagesTableName: func(topic string) string {
-				// Use backticks for MySQL to avoid issues with reserved keywords
-				return fmt.Sprintf("`watermill_%s`", topic)
-			},
-		}
-	case "postgres":
-		schemaAdapter = watermillsql.DefaultPostgreSQLSchema{}
-	default:
-		// This case should not be reached due to the init function.
-		_ = db.Close()
-		return nil, fmt.Errorf("unsupported db type: %s", d.dbType)
-	}
+	beginner := sql.BeginnerFromStdSQL(db)
+	schemaAdapter := d.getSchemaAdapter(u.Scheme)
+	offsetsAdapter := d.getOffsetsAdapter(u.Scheme)
 
-	publisher, err := watermillsql.NewPublisher(
-		db,
-		watermillsql.PublisherConfig{
+	publisher, err := sql.NewPublisher(
+		beginner,
+		sql.PublisherConfig{
 			SchemaAdapter: schemaAdapter,
 		},
 		logger,
@@ -73,13 +61,12 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 		return nil, fmt.Errorf("failed to create sql publisher: %w", err)
 	}
 
-	subscriber, err := watermillsql.NewSubscriber(
-		db,
-		watermillsql.SubscriberConfig{
-			SchemaAdapter:  schemaAdapter,
-			ConsumerGroup:  "casbin-watcher",
-			PollInterval:   time.Second,
-			ResendInterval: time.Second * 5,
+	subscriber, err := sql.NewSubscriber(
+		beginner,
+		sql.SubscriberConfig{
+			SchemaAdapter:    schemaAdapter,
+			OffsetsAdapter:   offsetsAdapter,
+			InitializeSchema: true, // Automatically create tables if they don't exist
 		},
 		logger,
 	)
@@ -89,50 +76,56 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 		return nil, fmt.Errorf("failed to create sql subscriber: %w", err)
 	}
 
-	return &sqlPubSub{
+	return &pubSub{
 		publisher:  publisher,
 		subscriber: subscriber,
 		db:         db,
 	}, nil
 }
 
-type sqlPubSub struct {
-	publisher  *watermillsql.Publisher
-	subscriber *watermillsql.Subscriber
-	db         *sql.DB
-}
-
-func (s *sqlPubSub) Publish(topic string, messages ...*message.Message) error {
-	return s.publisher.Publish(topic, messages...)
-}
-
-func (s *sqlPubSub) Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error) {
-	return s.subscriber.Subscribe(ctx, topic)
-}
-
-func (s *sqlPubSub) Close() error {
-	var allErrors error
-	allErrors = multierr.Append(allErrors, s.publisher.Close())
-	allErrors = multierr.Append(allErrors, s.subscriber.Close())
-	allErrors = multierr.Append(allErrors, s.db.Close())
-	return allErrors
-}
-
-func parseSQLURL(u *url.URL, dbType string) (string, error) {
-	switch dbType {
+func (d *Driver) getSchemaAdapter(scheme string) sql.SchemaAdapter {
+	switch scheme {
 	case "postgres":
-		// For postgres, the URL format is usually directly compatible.
-		return u.String(), nil
+		return sql.DefaultPostgreSQLSchema{}
 	case "mysql":
-		// For mysql, the DSN format is user:password@tcp(host)/dbname?query
-		// We need to reconstruct it from the URL.
-		password, _ := u.User.Password()
-		dsn := fmt.Sprintf("%s:%s@tcp(%s)%s", u.User.Username(), password, u.Host, u.Path)
-		if u.RawQuery != "" {
-			dsn += "?" + u.RawQuery
-		}
-		return dsn, nil
+		return sql.DefaultMySQLSchema{}
 	default:
-		return "", fmt.Errorf("unsupported db type for DSN parsing: %s", dbType)
+		// This should not happen as we only register for "postgres" and "mysql".
+		// Fallback to PostgreSQL schema.
+		return sql.DefaultPostgreSQLSchema{}
 	}
+}
+
+func (d *Driver) getOffsetsAdapter(scheme string) sql.OffsetsAdapter {
+	switch scheme {
+	case "postgres":
+		return sql.DefaultPostgreSQLOffsetsAdapter{}
+	case "mysql":
+		return sql.DefaultMySQLOffsetsAdapter{}
+	default:
+		// Fallback to PostgreSQL offsets adapter.
+		return sql.DefaultPostgreSQLOffsetsAdapter{}
+	}
+}
+
+type pubSub struct {
+	publisher  *sql.Publisher
+	subscriber *sql.Subscriber
+	db         *stdSQL.DB
+}
+
+func (p *pubSub) Publish(topic string, messages ...*message.Message) error {
+	return p.publisher.Publish(topic, messages...)
+}
+
+func (p *pubSub) Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error) {
+	return p.subscriber.Subscribe(ctx, topic)
+}
+
+func (p *pubSub) Close() error {
+	var allErrors error
+	allErrors = multierr.Append(allErrors, p.publisher.Close())
+	allErrors = multierr.Append(allErrors, p.subscriber.Close())
+	allErrors = multierr.Append(allErrors, p.db.Close())
+	return allErrors
 }

@@ -2,23 +2,23 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
+	stdSQL "database/sql"
 	"fmt"
 	"net/url"
 	"strings"
-	"time"
 
-	"github.com/ThreeDotsLabs/watermill"
-	watermillsql "github.com/ThreeDotsLabs/watermill-sql/pkg/sql"
-	"github.com/ThreeDotsLabs/watermill/message"
-	_ "github.com/mattn/go-sqlite3" // Standard SQLite driver
 	"go.uber.org/multierr"
 
+	"github.com/ThreeDotsLabs/watermill"
+	"github.com/ThreeDotsLabs/watermill-sqlite/wmsqlitemodernc"
+	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/origadmin/casbin-watcher/v3"
+
+	_ "modernc.org/sqlite" // modernc.org/sqlite driver for wmsqlitemodernc
 )
 
 func init() {
-	watcher.RegisterDriver("sqlite3", &Driver{})
+	watcher.RegisterDriver("sqlite", &Driver{})
 }
 
 // Driver for SQLite.
@@ -26,46 +26,62 @@ type Driver struct{}
 
 // NewPubSub creates a new Pub/Sub for SQLite.
 func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.LoggerAdapter) (watcher.PubSub, error) {
-	dsn := parseSQLiteURL(u)
-
-	db, err := sql.Open("sqlite3", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+	// Determine the database file path.
+	// If the URL path is provided, use it. Otherwise, check the 'path' query parameter.
+	// If neither, default to an in-memory database.
+	dbFilePath := u.Path
+	if dbFilePath == "" || dbFilePath == "/" {
+		dbFilePath = u.Query().Get("path")
+		if dbFilePath == "" {
+			dbFilePath = ":memory:" // Default to in-memory if no path is specified
+		}
+	} else {
+		// Remove leading slash if present, for consistency with file paths.
+		dbFilePath = strings.TrimPrefix(dbFilePath, "/")
 	}
+
+	// Build the DSN string.
+	// All query parameters from the URL are passed as SQLite pragmas.
+	dsn := fmt.Sprintf("file:%s", dbFilePath)
+	if len(u.Query()) > 0 {
+		dsn += "?" + u.Query().Encode()
+	}
+
+	db, err := stdSQL.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open modernc sqlite database: %w", err)
+	}
+	// modernc.org/sqlite limitation
+	db.SetMaxOpenConns(1)
+
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("failed to connect to sqlite database: %w", err)
+		return nil, fmt.Errorf("failed to connect to modernc sqlite database: %w", err)
 	}
 
-	// Use the correct SchemaAdapter for SQLite.
-	schemaAdapter := watermillsql.DefaultSQLiteSchema{}
-
-	publisher, err := watermillsql.NewPublisher(
+	publisher, err := wmsqlitemodernc.NewPublisher(
 		db,
-		watermillsql.PublisherConfig{
-			SchemaAdapter: schemaAdapter,
+		wmsqlitemodernc.PublisherOptions{
+			InitializeSchema: true,
+			Logger:           logger,
 		},
-		logger,
 	)
 	if err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("failed to create sqlite publisher: %w", err)
+		return nil, fmt.Errorf("failed to create modernc sqlite publisher: %w", err)
 	}
 
-	subscriber, err := watermillsql.NewSubscriber(
+	subscriber, err := wmsqlitemodernc.NewSubscriber(
 		db,
-		watermillsql.SubscriberConfig{
-			SchemaAdapter:  schemaAdapter,
-			ConsumerGroup:  "casbin-watcher",
-			PollInterval:   time.Second,
-			ResendInterval: time.Second * 5,
+		wmsqlitemodernc.SubscriberOptions{
+			InitializeSchema: true,
+			Logger:           logger,
 		},
-		logger,
 	)
 	if err != nil {
 		_ = publisher.Close()
 		_ = db.Close()
-		return nil, fmt.Errorf("failed to create sqlite subscriber: %w", err)
+		return nil, fmt.Errorf("failed to create modernc sqlite subscriber: %w", err)
 	}
 
 	return &pubSub{
@@ -76,36 +92,23 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 }
 
 type pubSub struct {
-	publisher  *watermillsql.Publisher
-	subscriber *watermillsql.Subscriber
-	db         *sql.DB
+	publisher  message.Publisher
+	subscriber message.Subscriber
+	db         *stdSQL.DB
 }
 
-func (s *pubSub) Publish(topic string, messages ...*message.Message) error {
-	return s.publisher.Publish(topic, messages...)
+func (p *pubSub) Publish(topic string, messages ...*message.Message) error {
+	return p.publisher.Publish(topic, messages...)
 }
 
-func (s *pubSub) Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error) {
-	return s.subscriber.Subscribe(ctx, topic)
+func (p *pubSub) Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error) {
+	return p.subscriber.Subscribe(ctx, topic)
 }
 
-func (s *pubSub) Close() error {
+func (p *pubSub) Close() error {
 	var allErrors error
-	allErrors = multierr.Append(allErrors, s.publisher.Close())
-	allErrors = multierr.Append(allErrors, s.subscriber.Close())
-	allErrors = multierr.Append(allErrors, s.db.Close())
+	allErrors = multierr.Append(allErrors, p.publisher.Close())
+	allErrors = multierr.Append(allErrors, p.subscriber.Close())
+	allErrors = multierr.Append(allErrors, p.db.Close())
 	return allErrors
-}
-
-// parseSQLiteURL extracts the file path from a URL.
-// For SQLite, the DSN is the path to the database file.
-// A URL like `sqlite3:///path/to/your.db` will be parsed to `/path/to/your.db`.
-// On Windows, `sqlite3:///D:/path/to/your.db` becomes `D:/path/to/your.db`.
-func parseSQLiteURL(u *url.URL) string {
-	// For Windows paths, the leading `/` needs to be removed.
-	// For example, /D:/path/to/db.sqlite -> D:/path/to/db.sqlite
-	if len(u.Path) > 2 && u.Path[0] == '/' && u.Path[2] == ':' {
-		return strings.TrimPrefix(u.Path, "/")
-	}
-	return u.Path
 }

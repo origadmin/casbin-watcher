@@ -26,9 +26,16 @@ The driver uses a standard AMQP 0-9-1 connection URI.
 amqp://user:password@host:port/vhost
 ```
 
-- **`user:password`**: Authentication credentials for the RabbitMQ broker.
-- **`host:port`**: The address and port of the RabbitMQ server.
-- **`vhost`**: The virtual host to use. If omitted, the default virtual host (`/`) is used.
+### Configuration Parameters
+
+The configuration is entirely derived from the AMQP connection URI itself.
+
+| Part            | Description                                                                | Example           |
+|-----------------|----------------------------------------------------------------------------|-------------------|
+| `scheme`        | The protocol, which must be `amqp`.                                        | `amqp://...`      |
+| `user:password` | (Optional) Authentication credentials for the RabbitMQ broker.             | `guest:guest@...` |
+| `host:port`     | The address and port of the RabbitMQ server.                               | `localhost:5672`  |
+| `vhost`         | (Optional) The virtual host to use. If omitted, the default (`/`) is used. | `.../my_vhost`    |
 
 ### Usage Example
 

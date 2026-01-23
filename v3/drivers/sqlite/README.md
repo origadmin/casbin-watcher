@@ -1,62 +1,64 @@
 # SQLite Driver for Casbin Watcher
 
-This directory contains the standalone SQLite driver for `casbin-watcher`.
+This directory contains the SQLite driver for `casbin-watcher`.
 
-This driver uses the `watermill-sql` library to provide a Pub/Sub mechanism over a SQLite database. It relies on the
-standard `github.com/mattn/go-sqlite3` driver.
+This driver uses the `wmsqlitemodernc` package from `watermill-sqlite`, which is a pure Go implementation and does not
+require CGO.
 
 ## Configuration
 
-The driver is configured using a URL. The format requires the path to the database file.
+The driver is configured using a URL.
 
 ### URL Format
 
 ```
-sqlite3:///path/to/your_database.db
+sqlite://?path=/path/to/your_database.db
 ```
 
-- The scheme must be `sqlite3`.
-- The path should be an absolute path to the database file.
+- **Scheme**: The scheme must be `sqlite`.
+- **Parameters**: The database file path is configured via a query parameter.
 
-**Note on Windows Paths:** For Windows paths, the format should still use forward slashes and include a leading slash
-before the drive letter. The driver will correctly parse it.
+### Configuration Parameters
 
-```
-sqlite3:///D:/path/to/your_database.db
-```
+| Parameter | Type     | Default | Description                                         | Example            |
+|-----------|----------|---------|-----------------------------------------------------|--------------------|
+| `path`    | `string` | (none)  | **Required.** The path to the SQLite database file. | `path=./my_app.db` |
 
 ### Table Creation
 
-The driver uses `watermill`'s `DefaultSQLiteSchema` to automatically create the necessary table (e.g.,
-`watermill_casbin-updates`) for storing messages if it does not already exist.
+The driver will automatically create the necessary tables for storing messages and offsets if they do not already exist.
 
 ## Usage Example
 
 ```go
 import (
+"context"
+"log"
+
 "github.com/casbin/casbin/v2"
 "github.com/origadmin/casbin-watcher/v3"
 _ "github.com/origadmin/casbin-watcher/v3/drivers/sqlite" // Register the driver
 )
 
 func main() {
-// The URL points to the SQLite database file.
-// The topic "casbin_rules" will be used as the table name suffix.
-w, err := watcher.NewWatcher("sqlite3:///D:/temp/test.db?topic=casbin_rules")
+// The topic for policy updates is "casbin_updates".
+connectionURL := "sqlite://?path=./casbin_events.db"
+
+w, err := watcher.NewWatcher(context.Background(), connectionURL, "casbin_updates")
 if err != nil {
-panic(err)
+log.Fatalf("Failed to create watcher: %v", err)
 }
 
 e, err := casbin.NewEnforcer("model.conf", "policy.csv")
 if err != nil {
-panic(err)
+log.Fatalf("Failed to create enforcer: %v", err)
 }
 
 err = e.SetWatcher(w)
 if err != nil {
-panic(err)
+log.Fatalf("Failed to set watcher: %v", err)
 }
 
-// ...
+// Policy changes will now be broadcast via the SQLite database.
 }
 ```

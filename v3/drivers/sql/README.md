@@ -58,35 +58,41 @@ postgres://user:password@localhost:5432/casbin?sslmode=disable
 
 ### Table Creation
 
-The driver uses `watermill`'s schema adapters to automatically create the necessary table (e.g.,
-`watermill_casbin-updates`) for storing messages if it does not already exist.
+The driver uses `watermill`'s schema adapters to automatically create the necessary tables (e.g., `watermill_messages`,
+`watermill_offsets`) for storing messages and offsets if they do not already exist.
 
 ## Usage Example
 
 ```go
 import (
-"github.com/casbin/casbin/v2"
-"github.com/origadmin/casbin-watcher/v3"
-_ "github.com/origadmin/casbin-watcher/v3/drivers/sql" // Register the driver
+    "context"
+    "log"
+
+    "github.com/casbin/casbin/v2"
+    "github.com/origadmin/casbin-watcher/v3"
+    _ "github.com/origadmin/casbin-watcher/v3/drivers/sql" // Register the driver
 )
 
 func main() {
-// Example for PostgreSQL
-w, err := watcher.NewWatcher("postgres://user:pass@localhost:5432/casbin_db?sslmode=disable&topic=casbin_rules")
-if err != nil {
-panic(err)
-}
+    // Example for PostgreSQL
+    // The topic for policy updates is "casbin_updates".
+    connectionURL := "postgres://user:pass@localhost:5432/casbin_db?sslmode=disable"
+    
+    w, err := watcher.NewWatcher(context.Background(), connectionURL, "casbin_updates")
+    if err != nil {
+        log.Fatalf("Failed to create watcher: %v", err)
+    }
 
-e, err := casbin.NewEnforcer("model.conf", "policy.csv")
-if err != nil {
-panic(err)
-}
+    e, err := casbin.NewEnforcer("model.conf", "policy.csv")
+    if err != nil {
+        log.Fatalf("Failed to create enforcer: %v", err)
+    }
 
-err = e.SetWatcher(w)
-if err != nil {
-panic(err)
-}
-
-// ...
+    err = e.SetWatcher(w)
+    if err != nil {
+        log.Fatalf("Failed to set watcher: %v", err)
+    }
+    
+    // Policy changes will now be broadcast via the SQL database.
 }
 ```
