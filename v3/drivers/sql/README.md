@@ -63,36 +63,17 @@ The driver uses `watermill`'s schema adapters to automatically create the necess
 
 ## Usage Example
 
-```go
-import (
-    "context"
-    "log"
+### PostgreSQL
 
-    "github.com/casbin/casbin/v2"
-    "github.com/origadmin/casbin-watcher/v3"
-    _ "github.com/origadmin/casbin-watcher/v3/drivers/sql" // Register the driver
-)
-
-func main() {
-    // Example for PostgreSQL
-    // The topic for policy updates is "casbin_updates".
-    connectionURL := "postgres://user:pass@localhost:5432/casbin_db?sslmode=disable"
-    
-    w, err := watcher.NewWatcher(context.Background(), connectionURL, "casbin_updates")
-    if err != nil {
-        log.Fatalf("Failed to create watcher: %v", err)
-    }
-
-    e, err := casbin.NewEnforcer("model.conf", "policy.csv")
-    if err != nil {
-        log.Fatalf("Failed to create enforcer: %v", err)
-    }
-
-    err = e.SetWatcher(w)
-    if err != nil {
-        log.Fatalf("Failed to set watcher: %v", err)
-    }
-    
-    // Policy changes will now be broadcast via the SQL database.
-}
 ```
+postgres://user:pass@localhost:5432/casbin_db?sslmode=disable
+```
+
+### MySQL
+
+```
+mysql://root:password@tcp(127.0.0.1:3306)/casbin
+```
+
+The topic for policy updates is taken from the URL path or defaults to `casbin-policy-updates`. You can also specify it
+using the `WithTopic` option.

@@ -46,34 +46,20 @@ kafka://<broker1:port1>,<broker2:port2>?<parameters>
 
 ## Usage Example
 
-```go
-import (
-"github.com/casbin/casbin/v2"
-"github.com/origadmin/casbin-watcher/v3"
-_ "github.com/origadmin/casbin-watcher/v3/drivers/kafka" // Register the driver
-)
+### Basic Connection
 
-func main() {
-// Example for connecting to a Kafka cluster with SASL authentication.
-// The topic "casbin-policy-updates" is passed as the second argument.
-w, err := watcher.NewWatcher(
-"kafka://kafka-broker1:9092,kafka-broker2:9092?consumer_group=my-app&sasl_enable=true&sasl_user=my-user&sasl_password=my-password",
-"casbin-policy-updates",
-)
-if err != nil {
-panic(err)
-}
+```
+kafka://localhost:9092
+```
 
-e, err := casbin.NewEnforcer("model.conf", "policy.csv")
-if err != nil {
-panic(err)
-}
+### With SASL Authentication
 
-err = e.SetWatcher(w)
-if err != nil {
-panic(err)
-}
+```
+kafka://kafka-broker1:9092?consumer_group=my-app&sasl_enable=true&sasl_user=my-user&sasl_password=my-password
+```
 
-// ...
-}
+### With Custom Marshaler
+
+```
+kafka://localhost:9092?consumer_group=my-app&marshaler=json
 ```

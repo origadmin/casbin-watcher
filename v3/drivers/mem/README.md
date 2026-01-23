@@ -34,41 +34,22 @@ mem:///topic?shared=true&buffer_size=1024
 | `shared`      | `boolean` | `true`  | If `true`, uses a single global instance for all watchers. If `false`, creates an isolated instance. | `shared=false`     |
 | `buffer_size` | `integer` | `0`     | The size of the buffer for the underlying Go channel. A size of `0` means the channel is unbuffered. | `buffer_size=1024` |
 
-### Usage Example
+## Usage Example
 
-```go
-import (
-"context"
-"log"
+### Shared Instance
 
-"github.com/casbin/casbin/v2"
-"github.com/origadmin/casbin-watcher/v3"
-_ "github.com/origadmin/casbin-watcher/v3/drivers/mem" // Register the driver
-)
+```
+mem:///casbin_updates
+```
 
-func main() {
-// Use a shared in-memory watcher with the topic "casbin_updates".
-connectionURL := "mem:///casbin_updates"
+### Isolated Instance
 
-w, err := watcher.NewWatcher(context.Background(), connectionURL)
-if err != nil {
-log.Fatalf("Failed to create watcher: %v", err)
-}
+```
+mem:///casbin_updates?shared=false
+```
 
-// Use an isolated (non-shared) watcher.
-// connectionURL_isolated := "mem:///casbin_updates?shared=false"
-// w_isolated, _ := watcher.NewWatcher(context.Background(), connectionURL_isolated)
+### With Buffer Size
 
-e, err := casbin.NewEnforcer("model.conf", "policy.csv")
-if err != nil {
-log.Fatalf("Failed to create enforcer: %v", err)
-}
-
-err = e.SetWatcher(w)
-if err != nil {
-log.Fatalf("Failed to set watcher: %v", err)
-}
-
-// ...
-}
+```
+mem:///casbin_updates?buffer_size=1024
 ```

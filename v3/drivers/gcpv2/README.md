@@ -52,34 +52,20 @@ gcpv2://<project_id>?subscription_name=<sub_name>&<other_parameters>
 
 ## Usage Example
 
-```go
-import (
-"github.com/casbin/casbin/v2"
-"github.com/origadmin/casbin-watcher/v3"
-_ "github.com/origadmin/casbin-watcher/v3/drivers/gcpv2" // Register the driver
-)
+### Basic Setup
 
-func main() {
-// Recommended setup: specify a unique subscription name for your service.
-// The topic "casbin-policy-updates" is passed as the second argument.
-w, err := watcher.NewWatcher(
-"gcpv2://my-gcp-project-id?subscription_name=my-app-casbin-sub&max_outstanding_messages=200&num_goroutines=20",
-"casbin-policy-updates",
-)
-if err != nil {
-panic(err)
-}
+```
+gcpv2://my-gcp-project-id
+```
 
-e, err := casbin.NewEnforcer("model.conf", "policy.csv")
-if err != nil {
-panic(err)
-}
+### With Custom Subscription Name
 
-err = e.SetWatcher(w)
-if err != nil {
-panic(err)
-}
+```
+gcpv2://my-gcp-project-id?subscription_name=my-app-casbin-sub
+```
 
-// ...
-}
+### Highly Customized
+
+```
+gcpv2://my-gcp-project-id?subscription_name=my-app-casbin-sub&max_outstanding_messages=200&num_goroutines=20
 ```

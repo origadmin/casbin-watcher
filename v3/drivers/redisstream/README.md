@@ -35,38 +35,16 @@ redisstream://user:password@host:port/db_number?pool_size=10&consumer_group=my_g
 | `pool_size`      | `integer` | (Redis default)         | The connection pool size for the Redis client.                                                                                                   | `pool_size=20`                |
 | `consumer_group` | `string`  | `casbin-watcher-<UUID>` | The name of the Redis Streams consumer group. If not provided, a unique name is generated to ensure the watcher acts as an independent consumer. | `consumer_group=casbin_nodes` |
 
-### Usage Example
+## Usage Example
 
-```go
-import (
-    "context"
-    "log"
+### Basic Connection
 
-    "github.com/casbin/casbin/v2"
-    "github.com/origadmin/casbin-watcher/v3"
-    _ "github.com/origadmin/casbin-watcher/v3/drivers/redisstream" // Register the driver
-)
+```
+redisstream://localhost:6379/1
+```
 
-func main() {
-    // Connect to a Redis server on DB 1, with a specific consumer group.
-    // The topic for policy updates is "casbin_updates".
-    connectionURL := "redisstream://localhost:6379/1?consumer_group=my_app_casbin_watcher"
-    
-    w, err := watcher.NewWatcher(context.Background(), connectionURL, "casbin_updates")
-    if err != nil {
-        log.Fatalf("Failed to create watcher: %v", err)
-    }
+### With Consumer Group
 
-    e, err := casbin.NewEnforcer("model.conf", "policy.csv")
-    if err != nil {
-        log.Fatalf("Failed to create enforcer: %v", err)
-    }
-
-    err = e.SetWatcher(w)
-    if err != nil {
-        log.Fatalf("Failed to set watcher: %v", err)
-    }
-    
-    // When you call e.SavePolicy(), the update will be sent via Redis Streams.
-}
+```
+redisstream://localhost:6379/1?consumer_group=my_app_casbin_watcher
 ```

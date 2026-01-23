@@ -30,35 +30,9 @@ The driver will automatically create the necessary tables for storing messages a
 
 ## Usage Example
 
-```go
-import (
-"context"
-"log"
-
-"github.com/casbin/casbin/v2"
-"github.com/origadmin/casbin-watcher/v3"
-_ "github.com/origadmin/casbin-watcher/v3/drivers/sqlite" // Register the driver
-)
-
-func main() {
-// The topic for policy updates is "casbin_updates".
-connectionURL := "sqlite://?path=./casbin_events.db"
-
-w, err := watcher.NewWatcher(context.Background(), connectionURL, "casbin_updates")
-if err != nil {
-log.Fatalf("Failed to create watcher: %v", err)
-}
-
-e, err := casbin.NewEnforcer("model.conf", "policy.csv")
-if err != nil {
-log.Fatalf("Failed to create enforcer: %v", err)
-}
-
-err = e.SetWatcher(w)
-if err != nil {
-log.Fatalf("Failed to set watcher: %v", err)
-}
-
-// Policy changes will now be broadcast via the SQLite database.
-}
 ```
+sqlite://?path=./casbin_events.db
+```
+
+The topic for policy updates is taken from the URL path or defaults to `casbin-policy-updates`. You can also specify it
+using the `WithTopic` option.

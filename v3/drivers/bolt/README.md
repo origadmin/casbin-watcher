@@ -39,37 +39,16 @@ bolt:///your_bucket_name?path=/path/to/your/database.db
 |-----------|----------|---------|-----------------------------------------------------------------|------------------------------------|
 | `path`    | `string` | (none)  | **Required.** The absolute or relative path to the BoltDB file. | `path=/var/data/casbin_watcher.db` |
 
-### Usage Example
+## Usage Example
 
-```go
-import (
-"context"
-"log"
+### Basic Connection
 
-"github.com/casbin/casbin/v2"
-"github.com/origadmin/casbin-watcher/v3"
-_ "github.com/origadmin/casbin-watcher/v3/drivers/bolt" // Register the driver
-)
+```
+bolt:///casbin_updates?path=./casbin_events.db
+```
 
-func main() {
-// Connect to a BoltDB file, using "casbin_updates" as the bucket name.
-connectionURL := "bolt:///casbin_updates?path=./casbin_events.db"
+### With Default Bucket
 
-w, err := watcher.NewWatcher(context.Background(), connectionURL, "casbin_updates")
-if err != nil {
-log.Fatalf("Failed to create watcher: %v", err)
-}
-
-e, err := casbin.NewEnforcer("model.conf", "policy.csv")
-if err != nil {
-log.Fatalf("Failed to create enforcer: %v", err)
-}
-
-err = e.SetWatcher(w)
-if err != nil {
-log.Fatalf("Failed to set watcher: %v", err)
-}
-
-// Policy changes will now be persisted in the BoltDB file under the "casbin_updates" bucket.
-}
+```
+bolt://?path=./casbin_events.db
 ```

@@ -36,36 +36,16 @@ firestore://?project_id=your-gcp-project-id&subscription_id=your-subscription-id
 | `project_id`      | `string` | (none)         | **Required.** Your Google Cloud project ID.                                      | `project_id=my-awesome-project` |
 | `subscription_id` | `string` | `topic-<UUID>` | The ID of the Firestore subscription. If omitted, a unique ID will be generated. | `subscription_id=casbin-sub`    |
 
-### Usage Example
+## Usage Example
 
-```go
-import (
-"context"
-"log"
+### Basic Setup
 
-"github.com/casbin/casbin/v2"
-"github.com/origadmin/casbin-watcher/v3"
-_ "github.com/origadmin/casbin-watcher/v3/drivers/firestore" // Register the driver
-)
+```
+firestore://?project_id=my-gcp-project
+```
 
-func main() {
-// The topic for policy updates is "casbin_updates".
-connectionURL := "firestore://?project_id=my-gcp-project&subscription_id=casbin-watcher-sub"
+### With Custom Subscription ID
 
-w, err := watcher.NewWatcher(context.Background(), connectionURL, "casbin_updates")
-if err != nil {
-log.Fatalf("Failed to create watcher: %v", err)
-}
-
-e, err := casbin.NewEnforcer("model.conf", "policy.csv")
-if err != nil {
-log.Fatalf("Failed to create enforcer: %v", err)
-}
-
-err = e.SetWatcher(w); err != nil {
-log.Fatalf("Failed to set watcher: %v", err)
-}
-
-// Policy changes will now be broadcast via Firestore.
-}
+```
+firestore://?project_id=my-gcp-project&subscription_id=casbin-watcher-sub
 ```

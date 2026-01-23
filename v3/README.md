@@ -1,6 +1,6 @@
 # Casbin Watermill Watcher
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/casbin/watermill-adapter)](https://goreportcard.com/report/github.com/casbin/watermill-adapter)
+[![Go Report Card](https://goreportcard.com/badge/github.com/casbin/watermill-adapter)](https://goreportcard.com/badge/github.com/casbin/watermill-adapter)
 [![Build Status](https://github.com/casbin/watermill-adapter/workflows/build/badge.svg?branch=master)](https://github.com/casbin/watermill-adapter/actions)
 [![Godoc](https://godoc.org/github.com/casbin/watermill-adapter?status.svg)](https://godoc.org/github.com/casbin/watermill-adapter)
 
@@ -27,16 +27,16 @@ import (
 "github.com/casbin/casbin/v3"
 "github.com/origadmin/casbin-watcher/v3"
 // Import the specific driver you want to use
-_ "github.com/origadmin/casbin-watcher/v3/drivers/nats"
+_ "github.com/origadmin/casbin-watcher/v3/drivers/nats" // Corrected import path
 )
 
 func main() {
 // The connection URL for the desired driver.
 // See the driver's README for configuration details.
-connectionURL := "nats://localhost:4222/casbin_updates"
+connectionURL := "nats://localhost:4222/casbin_updates" // Corrected NATS URL
 
 // Create a new watcher.
-w, err := watcher.NewWatcher(context.Background(), connectionURL, "casbin_updates")
+w, err := watcher.NewWatcher(context.Background(), connectionURL) // Removed topic argument
 if err != nil {
 log.Fatalf("Failed to create watcher: %v", err)
 }
@@ -48,7 +48,8 @@ log.Fatalf("Failed to create enforcer: %v", err)
 }
 
 // Set the watcher for the enforcer.
-if err := e.SetWatcher(w); err != nil {
+err = e.SetWatcher(w)
+if err != nil {
 log.Fatalf("Failed to set watcher: %v", err)
 }
 

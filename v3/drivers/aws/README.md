@@ -48,52 +48,14 @@ sqs://<queue_name>?region=<aws_region>&<other_parameters>
 
 ### Usage Example
 
-```go
-// watcher.NewWatcher("sqs://my-casbin-queue?region=us-east-1&wait_time_seconds=10")
-```
-
----
-
-## 2. SNS & SQS Driver (`snssqs`)
-
-This is a more advanced and recommended pattern for production. It allows multiple services to consume policy updates by
-subscribing their own SQS queues to a central SNS topic (fan-out).
-
-- **Publisher**: Sends messages to a specified SNS Topic ARN.
-- **Subscriber**: Receives messages from a specified SQS Queue URL.
-
-You are responsible for creating the SNS topic, the SQS queue, and **subscribing the queue to the topic** in your AWS
-environment.
-
-### Configuration
-
-The driver is configured using a URL that specifies the **consumer queue** and provides the **publisher topic** as a
-parameter.
+#### SQS-only
 
 ```
-snssqs://<queue_name>?region=<aws_region>&topic_arn=<sns_topic_arn>&<other_parameters>
+sqs://my-casbin-queue?region=us-east-1&wait_time_seconds=10
 ```
 
-- `<queue_name>`: The name of your SQS queue that is subscribed to the SNS topic.
-- `region`: **(Required)** The AWS region where the SNS topic and SQS queue exist.
-- `topic_arn`: **(Required)** The full ARN of the SNS topic to publish messages to.
+#### SNS & SQS
 
-### Configuration Parameters
-
-This driver supports the **same parameters** as the `sqs` driver for configuring the consumer part of the pattern (the
-SQS subscriber).
-
-| Parameter            | Type       | Default   | Description                                            | Example                     |
-|----------------------|------------|-----------|--------------------------------------------------------|-----------------------------|
-| `region`             | `string`   | `(none)`  | **Required.** The AWS region.                          | `region=us-east-1`          |
-| `topic_arn`          | `string`   | `(none)`  | **Required.** The ARN of the SNS topic for publishing. | `topic_arn=arn:aws:sns:...` |
-| `wait_time_seconds`  | `integer`  | `20`      | SQS long polling duration.                             | `wait_time_seconds=10`      |
-| `visibility_timeout` | `integer`  | `30`      | SQS message visibility timeout.                        | `visibility_timeout=60`     |
-| `close_timeout`      | `duration` | `30s`     | Graceful shutdown timeout for the SQS subscriber.      | `close_timeout=1m`          |
-| `marshaler`          | `string`   | `default` | Serialization format. Can be `default` or `json`.      | `marshaler=json`            |
-
-### Usage Example
-
-```go
-// watcher.NewWatcher("snssqs://my-casbin-queue?region=us-west-2&topic_arn=arn:aws:sns:us-west-2:123456789012:casbin-policy-updates")
+```
+snssqs://my-casbin-queue?region=us-west-2&topic_arn=arn:aws:sns:us-west-2:123456789012:casbin-policy-updates
 ```

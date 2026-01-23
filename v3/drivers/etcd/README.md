@@ -47,42 +47,22 @@ etcd://user:password@host1:port1,host2:port2/topic?dial_timeout=5s
 |----------------|------------|---------|------------------------------------------------|--------------------|
 | `dial_timeout` | `duration` | `5s`    | Timeout for establishing a connection to etcd. | `dial_timeout=10s` |
 
-### Usage Example
+## Usage Example
 
-```go
-import (
-"context"
-"log"
+### Basic Connection
 
-"github.com/casbin/casbin/v2"
-"github.com/origadmin/casbin-watcher/v3"
-_ "github.com/origadmin/casbin-watcher/v3/drivers/etcd" // Register the driver
-)
+```
+etcd://127.0.0.1:2379/casbin_policy
+```
 
-func main() {
-// Connect to a single etcd server with a 10-second timeout.
-// The topic for policy updates is "casbin_policy".
-connectionURL := "etcd://127.0.0.1:2379/casbin_policy?dial_timeout=10s"
+### With Custom Timeout
 
-w, err := watcher.NewWatcher(context.Background(), connectionURL)
-if err != nil {
-log.Fatalf("Failed to create watcher: %v", err)
-}
+```
+etcd://127.0.0.1:2379/casbin_policy?dial_timeout=10s
+```
 
-// Connect to a cluster with authentication.
-// connectionURL = "etcd://myuser:mypass@node1:2379,node2:2379,node3:2379/casbin_policy"
-// w, err := watcher.NewWatcher(context.Background(), connectionURL)
+### Cluster with Authentication
 
-e, err := casbin.NewEnforcer("model.conf", "policy.csv")
-if err != nil {
-log.Fatalf("Failed to create enforcer: %v", err)
-}
-
-err = e.SetWatcher(w)
-if err != nil {
-log.Fatalf("Failed to set watcher: %v", err)
-}
-
-// ...
-}
+```
+etcd://myuser:mypass@node1:2379,node2:2379,node3:2379/casbin_policy
 ```

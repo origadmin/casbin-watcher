@@ -33,40 +33,16 @@ io://?path=/path/to/your/file
 |-----------|----------|----------------|---------------------------------------------------------------------------------------------------------------------------------|---------------------|
 | `path`    | `string` | (stdin/stdout) | If provided, the driver will use this file for both reading and writing. If omitted, it defaults to `os.Stdin` and `os.Stdout`. | `path=./events.log` |
 
-### Usage Example
+## Usage Example
 
-```go
-import (
-    "context"
-    "log"
+### Standard Input/Output
 
-    "github.com/casbin/casbin/v2"
-    "github.com/origadmin/casbin-watcher/v3"
-    _ "github.com/origadmin/casbin-watcher/v3/drivers/io" // Register the driver
-)
+```
+io://
+```
 
-func main() {
-    // Example 1: Use standard input/output
-    // connectionURL_stdio := "io://"
-    // w, _ := watcher.NewWatcher(context.Background(), connectionURL_stdio, "casbin_updates")
+### File-Based
 
-    // Example 2: Use a file
-    connectionURL_file := "io://?path=./casbin_events.log"
-    w, err := watcher.NewWatcher(context.Background(), connectionURL_file, "casbin_updates")
-    if err != nil {
-        log.Fatalf("Failed to create watcher: %v", err)
-    }
-
-    e, err := casbin.NewEnforcer("model.conf", "policy.csv")
-    if err != nil {
-        log.Fatalf("Failed to create enforcer: %v", err)
-    }
-
-    err = e.SetWatcher(w)
-    if err != nil {
-        log.Fatalf("Failed to set watcher: %v", err)
-    }
-    
-    // Policy changes will now be written to the specified file or stdout.
-}
+```
+io://?path=./casbin_events.log
 ```
