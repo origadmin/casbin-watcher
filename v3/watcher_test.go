@@ -2,7 +2,6 @@ package watcher_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"testing"
@@ -135,55 +134,69 @@ func TestWithEnforcerMemory_NonShared(t *testing.T) {
 
 func TestWatcherEx(t *testing.T) {
 	endpointURL := "mem://casbin?shared=true"
-	updateCh := make(chan string, 1)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Use WatcherEx for the updater
-	updater, err := watcher.NewWatcherEx(ctx, endpointURL)
-	require.NoError(t, err)
-	defer updater.Close()
-
-	// Use a standard Watcher for the listener
-	listener, err := watcher.NewWatcher(ctx, endpointURL)
-	require.NoError(t, err)
-	defer listener.Close()
-
-	err = listener.SetUpdateCallback(func(msg string) {
-		updateCh <- msg
-	})
-	require.NoError(t, err)
-
-	// Test UpdateForAddPolicy
-	err = updater.UpdateForAddPolicy("p", "p", "alice", "data1", "read")
-	require.NoError(t, err)
-
-	select {
-	case msg := <-updateCh:
-		var updateMsg watcher.UpdateMessage
-		err := json.Unmarshal([]byte(msg), &updateMsg)
-		require.NoError(t, err)
-		require.Equal(t, "add-policy", updateMsg.Type)
-		require.Equal(t, "p", updateMsg.Sec)
-		require.Equal(t, "p", updateMsg.Ptype)
-		require.Equal(t, []string{"alice", "data1", "read"}, updateMsg.Params)
-	case <-time.After(time.Second * 5):
-		t.Fatal("Listener didn't receive message for AddPolicy in time")
+	tests := []struct {
+		name  string
+		codec watcher.MarshalUnmarshaler
+	}{
+		{
+			name:  "GOB Codec",
+			codec: watcher.DefaultCodec(),
+		},
+		{
+			name:  "JSON Codec",
+			codec: watcher.JSONCodec(),
+		},
 	}
 
-	// Test UpdateForRemovePolicy
-	err = updater.UpdateForRemovePolicy("p", "p", "bob", "data2", "write")
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
-	select {
-	case msg := <-updateCh:
-		var updateMsg watcher.UpdateMessage
-		err := json.Unmarshal([]byte(msg), &updateMsg)
-		require.NoError(t, err)
-		require.Equal(t, "remove-policy", updateMsg.Type)
-		require.Equal(t, []string{"bob", "data2", "write"}, updateMsg.Params)
-	case <-time.After(time.Second * 5):
-		t.Fatal("Listener didn't receive message for RemovePolicy in time")
+			updateCh := make(chan watcher.UpdateMessage, 1)
+
+			updater, err := watcher.NewWatcherEx(ctx, endpointURL, watcher.WithCodec(tt.codec))
+			require.NoError(t, err)
+			defer updater.Close()
+
+			listener, err := watcher.NewWatcher(ctx, endpointURL)
+			require.NoError(t, err)
+			defer listener.Close()
+
+			err = listener.SetUpdateCallback(func(msg string) {
+				var updateMsg watcher.UpdateMessage
+				err := tt.codec.Unmarshal([]byte(msg), &updateMsg)
+				require.NoError(t, err)
+				updateCh <- updateMsg
+			})
+			require.NoError(t, err)
+
+			// Test UpdateForAddPolicy
+			err = updater.UpdateForAddPolicy("p", "p", "alice", "data1", "read")
+			require.NoError(t, err)
+
+			select {
+			case updateMsg := <-updateCh:
+				require.Equal(t, watcher.UpdateTypeAddPolicy, updateMsg.Type)
+				require.Equal(t, "p", updateMsg.Sec)
+				require.Equal(t, "p", updateMsg.Ptype)
+				require.Equal(t, []string{"alice", "data1", "read"}, updateMsg.Params)
+			case <-time.After(time.Second * 5):
+				t.Fatal("Listener didn't receive message for AddPolicy in time")
+			}
+
+			// Test UpdateForRemovePolicy
+			err = updater.UpdateForRemovePolicy("p", "p", "bob", "data2", "write")
+			require.NoError(t, err)
+
+			select {
+			case updateMsg := <-updateCh:
+				require.Equal(t, watcher.UpdateTypeRemovePolicy, updateMsg.Type)
+				require.Equal(t, []string{"bob", "data2", "write"}, updateMsg.Params)
+			case <-time.After(time.Second * 5):
+				t.Fatal("Listener didn't receive message for RemovePolicy in time")
+			}
+		})
 	}
 }

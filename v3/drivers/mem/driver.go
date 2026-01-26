@@ -89,7 +89,7 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 		}
 		// For shared instances, we need to ensure the global instance is not nil before returning.
 		// A read lock is not strictly needed here as the write lock is held, but conceptually,
-		- // subsequent NewPubSub calls will acquire a read lock to access globalMemoryPubSub.
+		// subsequent NewPubSub calls will acquire a read lock to access globalMemoryPubSub.
 		return &memoryPubSubWrapper{PubSub: globalMemoryPubSub, shared: true}, nil
 	}
 

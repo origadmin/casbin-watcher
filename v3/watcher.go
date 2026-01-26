@@ -1,9 +1,7 @@
 package watcher
 
 import (
-	"bytes"
 	"context"
-	"encoding/gob"
 	"fmt"
 	"net/url"
 	"strings"
@@ -15,8 +13,12 @@ import (
 	"github.com/casbin/casbin/v3/persist"
 )
 
+// DefaultTopic is the default topic used for policy update notifications.
+const DefaultTopic = "casbin-policy-updates"
+
 // Update types for Ex messages.
 const (
+	UpdateTypePolicyChanged        = "policy-changed"
 	UpdateTypeAddPolicy            = "add-policy"
 	UpdateTypeRemovePolicy         = "remove-policy"
 	UpdateTypeRemoveFilteredPolicy = "remove-filtered-policy"
@@ -24,32 +26,6 @@ const (
 	UpdateTypeAddPolicies          = "add-policies"
 	UpdateTypeRemovePolicies       = "remove-policies"
 )
-
-// MarshalUnmarshaler is the interface for serializing and deserializing UpdateMessage.
-type MarshalUnmarshaler interface {
-	Marshal(v interface{}) ([]byte, error)
-	Unmarshal(data []byte, v interface{}) error
-}
-
-// gobMarshalUnmarshaler provides a default gob implementation for MarshalUnmarshaler.
-type gobMarshalUnmarshaler struct{}
-
-// Marshal uses gob to marshal the value.
-func (g *gobMarshalUnmarshaler) Marshal(v interface{}) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	if err := enc.Encode(v); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// Unmarshal uses gob to unmarshal the data.
-func (g *gobMarshalUnmarshaler) Unmarshal(data []byte, v interface{}) error {
-	buf := bytes.NewBuffer(data)
-	dec := gob.NewDecoder(buf)
-	return dec.Decode(v)
-}
 
 // baseWatcher contains the common logic for both Watcher and Ex.
 type baseWatcher struct {
@@ -91,32 +67,11 @@ func WithCodec(codec MarshalUnmarshaler) Option {
 	}
 }
 
-// newBaseWatcher creates a new base watcher instance.
-func newBaseWatcher(ctx context.Context, connectionURL string, opts ...Option) (*baseWatcher, error) {
-	o := &options{
-		Topic:  "casbin-policy-updates",              // Default topic
-		Logger: watermill.NewStdLogger(false, false), // Default logger
-		Codec:  &gobMarshalUnmarshaler{},             // Default codec
-	}
-
-	// Apply functional options first to allow them to override defaults.
-	for _, opt := range opts {
-		opt(o)
-	}
-
+// newBaseWatcher creates a new base watcher instance with the provided options.
+func newBaseWatcher(ctx context.Context, connectionURL string, o *options) (*baseWatcher, error) {
 	u, err := url.Parse(connectionURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse url: %w", err)
-	}
-
-	// URL Path overrides default topic, but can be overridden by functional options.
-	// This logic needs to be adjusted if functional options should always have highest priority.
-	// For now, keeping functional options as highest priority.
-	if u.Path != "" && u.Path != "/" {
-		// Only set if not already set by an option
-		if o.Topic == "casbin-policy-updates" { // Check if it's still the default
-			o.Topic = strings.TrimPrefix(u.Path, "/")
-		}
 	}
 
 	driversMu.RLock()
@@ -147,6 +102,37 @@ func newBaseWatcher(ctx context.Context, connectionURL string, opts ...Option) (
 	}
 
 	return w, nil
+}
+
+// parseOptions parses and merges options from URL and functional options.
+func parseOptions(connectionURL string, opts ...Option) (*options, error) {
+	o := &options{
+		Topic:  "",                                   // Empty by default, will be set from URL or options
+		Logger: watermill.NewStdLogger(false, false), // Default logger
+		Codec:  &gobMarshalUnmarshaler{},             // Default codec (only used by Ex)
+	}
+
+	u, err := url.Parse(connectionURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse url: %w", err)
+	}
+
+	// Priority: WithTopic > URL Path > Default
+	// First, apply URL path if it exists
+	if u.Path != "" && u.Path != "/" {
+		o.Topic = strings.TrimPrefix(u.Path, "/")
+	}
+	// Then, functional options can override URL path
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	// If still not set, use default
+	if o.Topic == "" {
+		o.Topic = DefaultTopic
+	}
+
+	return o, nil
 }
 
 func (w *baseWatcher) startSubscribe(ctx context.Context) error {
@@ -206,11 +192,28 @@ func (w *baseWatcher) Update() error {
 	return w.pubsub.Publish(w.topic, msg)
 }
 
-func (w *baseWatcher) Close() {
+// closeInternal performs the actual close operation and returns any error.
+// This is an internal helper to allow proper error handling without changing the public interface.
+func (w *baseWatcher) closeInternal() error {
+	select {
+	case <-w.closed:
+		// Already closed
+		return nil
+	default:
+	}
+
 	close(w.closed)
 	if err := w.pubsub.Close(); err != nil {
 		w.logger.Error("failed to close pubsub", err, nil)
+		return err
 	}
+	return nil
+}
+
+// Close stops and releases the watcher.
+// Public interface method - errors are logged but not returned to match persist.Watcher interface.
+func (w *baseWatcher) Close() {
+	_ = w.closeInternal()
 }
 
 // Watcher implements persist.Watcher.
@@ -220,7 +223,11 @@ type Watcher struct {
 
 // NewWatcher creates a new Watcher (basic mode).
 func NewWatcher(ctx context.Context, connectionURL string, opts ...Option) (*Watcher, error) {
-	base, err := newBaseWatcher(ctx, connectionURL, opts...)
+	o, err := parseOptions(connectionURL, opts...)
+	if err != nil {
+		return nil, err
+	}
+	base, err := newBaseWatcher(ctx, connectionURL, o)
 	if err != nil {
 		return nil, err
 	}
@@ -235,22 +242,18 @@ type Ex struct {
 
 // NewWatcherEx creates a new Ex (extended mode).
 func NewWatcherEx(ctx context.Context, connectionURL string, opts ...Option) (*Ex, error) {
-	o := &options{
-		Topic:  "casbin-policy-updates",              // Default topic
-		Logger: watermill.NewStdLogger(false, false), // Default logger
-		Codec:  &gobMarshalUnmarshaler{},             // Default codec
-	}
-
-	// Apply functional options first to allow them to override defaults.
-	for _, opt := range opts {
-		opt(o)
-	}
-
-	base, err := newBaseWatcher(ctx, connectionURL, opts...)
+	o, err := parseOptions(connectionURL, opts...)
 	if err != nil {
 		return nil, err
 	}
-	return &Ex{baseWatcher: base, codec: o.Codec}, nil
+	base, err := newBaseWatcher(ctx, connectionURL, o)
+	if err != nil {
+		return nil, err
+	}
+	return &Ex{
+		baseWatcher: base,
+		codec:       o.Codec,
+	}, nil
 }
 
 // UpdateMessage represents the payload for Ex updates.
@@ -271,6 +274,12 @@ func (w *Ex) publishUpdate(u UpdateMessage) error {
 	return w.pubsub.Publish(w.topic, msg)
 }
 
+// Update calls the update callback of other instances to synchronize their policy.
+// This method is part of the Watcher interface and publishes a generic "policy-changed" message.
+func (w *Ex) Update() error {
+	return w.publishUpdate(UpdateMessage{Type: UpdateTypePolicyChanged})
+}
+
 func (w *Ex) UpdateForAddPolicy(sec, ptype string, params ...string) error {
 	return w.publishUpdate(UpdateMessage{Type: UpdateTypeAddPolicy, Sec: sec, Ptype: ptype, Params: params})
 }
@@ -288,11 +297,6 @@ func (w *Ex) UpdateForRemoveFilteredPolicy(sec, ptype string, fieldIndex int, fi
 	})
 }
 
-// UpdateForSavePolicy is called when the policy is saved.
-// This implementation sends a generic "save-policy" update notification.
-// It does not send the full model to avoid large message payloads.
-// The receiving Casbin enforcer is expected to reload the entire policy from the
-// persistence layer (e.g., database) upon receiving this notification.
 func (w *Ex) UpdateForSavePolicy(_ model.Model) error {
 	return w.publishUpdate(UpdateMessage{Type: UpdateTypeSavePolicy})
 }
