@@ -15,50 +15,47 @@ import (
 )
 
 func init() {
+	// Register the memory driver with the watcher framework.
 	watcher.RegisterDriver("mem", &Driver{})
 }
 
-type Driver struct{}
-
-// globalMemoryPubSub ensures that all memory-based watchers in the same process
-// can communicate with each other.
-var (
-	globalMemoryPubSub   *memoryPubSub
-	globalMemoryPubSubMu sync.RWMutex // Use RWMutex for better concurrency control
-)
-
-type memoryPubSub struct {
-	pubsub *gochannel.GoChannel
+// Driver implements the watcher.Driver interface for the in-memory pub/sub.
+// It manages the creation and lifecycle of PubSub instances.
+type Driver struct {
+	// once ensures that the shared pubsub instance is initialized only once.
+	once sync.Once
+	// pubsub is the shared memory-based pub/sub instance.
+	pubsub *memoryPubSub
 }
 
+// memoryPubSub is a wrapper around gochannel.GoChannel to implement the watcher.PubSub interface.
+type memoryPubSub struct {
+	pubsub *gochannel.GoChannel
+	shared bool
+}
+
+// Publish sends messages to the specified topic.
 func (m *memoryPubSub) Publish(topic string, messages ...*message.Message) error {
 	// gochannel.GoChannel's Publish can return an error if the pubsub is closed.
 	return m.pubsub.Publish(topic, messages...)
 }
 
+// Subscribe returns a channel of messages for the specified topic.
 func (m *memoryPubSub) Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error) {
 	// gochannel.GoChannel's Subscribe can return an error if the pubsub is closed.
 	return m.pubsub.Subscribe(ctx, topic)
 }
 
+// Close shuts down the pub/sub.
 func (m *memoryPubSub) Close() error {
+	if m.shared {
+		return nil
+	}
 	return m.pubsub.Close()
 }
 
-// memoryPubSubWrapper wraps the actual PubSub to handle shared instance closing logic.
-type memoryPubSubWrapper struct {
-	watcher.PubSub
-	shared bool
-}
-
-// Close for the wrapper. If the underlying PubSub is shared, it's a no-op.
-func (w *memoryPubSubWrapper) Close() error {
-	if !w.shared {
-		return w.PubSub.Close()
-	}
-	return nil
-}
-
+// NewPubSub creates a new PubSub instance based on the provided URL.
+// It supports both shared and non-shared instances.
 func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.LoggerAdapter) (watcher.PubSub, error) {
 	query := u.Query()
 	shared := true
@@ -80,22 +77,19 @@ func (d *Driver) NewPubSub(_ context.Context, u *url.URL, logger watermill.Logge
 	}
 
 	if shared {
-		globalMemoryPubSubMu.Lock() // Write lock for creating the global instance
-		defer globalMemoryPubSubMu.Unlock()
-		if globalMemoryPubSub == nil {
-			globalMemoryPubSub = &memoryPubSub{
+		// Initialize the shared pubsub instance once.
+		d.once.Do(func() {
+			d.pubsub = &memoryPubSub{
 				pubsub: gochannel.NewGoChannel(gochannel.Config{OutputChannelBuffer: int64(bufferSize)}, logger),
+				shared: true,
 			}
-		}
-		// For shared instances, we need to ensure the global instance is not nil before returning.
-		// A read lock is not strictly needed here as the write lock is held, but conceptually,
-		// subsequent NewPubSub calls will acquire a read lock to access globalMemoryPubSub.
-		return &memoryPubSubWrapper{PubSub: globalMemoryPubSub, shared: true}, nil
+		})
+		return d.pubsub, nil
 	}
 
 	// For non-shared instances, create a new one.
-	ps := &memoryPubSub{
+	return &memoryPubSub{
 		pubsub: gochannel.NewGoChannel(gochannel.Config{OutputChannelBuffer: int64(bufferSize)}, logger),
-	}
-	return &memoryPubSubWrapper{PubSub: ps, shared: false}, nil
+		shared: false,
+	}, nil
 }
