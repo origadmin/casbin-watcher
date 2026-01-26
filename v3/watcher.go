@@ -170,7 +170,16 @@ func (w *baseWatcher) handleMessage(msg *message.Message) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			w.logger.Error("panic in watcher callback", nil, watermill.LogFields{"panic": r})
+			var err error
+			switch v := r.(type) {
+			case error:
+				err = v
+			case string:
+				err = fmt.Errorf("%s", v)
+			default:
+				err = fmt.Errorf("%v", v)
+			}
+			w.logger.Error("panic in watcher callback", err, nil)
 		}
 	}()
 
