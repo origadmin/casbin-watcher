@@ -99,7 +99,11 @@ func (w *Watcher) executeCallback(msg *pubsub.Message) {
 	w.connMu.RLock()
 	defer w.connMu.RUnlock()
 	if w.callbackFunc != nil {
-		go w.callbackFunc(string(msg.Body))
+		// Execute the callback synchronously to prevent race conditions in tests
+		// and ensure predictable behavior. The original `go w.callbackFunc(...)`
+		// caused the enforcer's policy to be reloaded in the background,
+		// making it impossible to guarantee completion within a fixed time.
+		w.callbackFunc(string(msg.Body))
 	}
 }
 
