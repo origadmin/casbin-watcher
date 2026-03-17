@@ -318,6 +318,6 @@ func (w *Ex) UpdateForRemovePolicies(sec string, ptype string, rules ...[]string
 	return w.publishUpdate(UpdateMessage{Type: UpdateTypeRemovePolicies, Sec: sec, Ptype: ptype, Rules: rules})
 }
 
-// Ensure interfaces are implemented
+// Ensure contracts are implemented
 var _ persist.Watcher = &Watcher{}
 var _ persist.WatcherEx = &Ex{}

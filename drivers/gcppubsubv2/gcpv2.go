@@ -1,4 +1,4 @@
-// Package gcppubsubv2 implements the functions, types, and interfaces for the module.
+// Package gcppubsubv2 implements the functions, types, and contracts for the module.
 package gcppubsubv2
 
 import (

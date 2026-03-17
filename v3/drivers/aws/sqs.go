@@ -10,9 +10,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-aws/sqs"
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"go.uber.org/multierr"
 
 	"github.com/origadmin/casbin-watcher/v3"
@@ -40,18 +38,18 @@ func (d *SQSDriver) NewPubSub(ctx context.Context, u *url.URL, logger watermill.
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	var marshalerUnmarshaler sqs.MarshalerUnmarshaler
+	var marshaler sqs.Marshaler
+	var unmarshaler sqs.Unmarshaler
 	switch config.Marshaler {
-	case "json":
-		marshalerUnmarshaler = &sqs.JSONMarshaler{}
 	default: // "default"
-		marshalerUnmarshaler = &sqs.DefaultMarshaler{}
+		marshaler = &sqs.DefaultMarshalerUnmarshaler{}
+		unmarshaler = &sqs.DefaultMarshalerUnmarshaler{}
 	}
 
 	publisher, err := sqs.NewPublisher(
 		sqs.PublisherConfig{
 			AWSConfig: awsCfg,
-			Marshaler: marshalerUnmarshaler,
+			Marshaler: marshaler,
 		},
 		logger,
 	)
@@ -61,15 +59,23 @@ func (d *SQSDriver) NewPubSub(ctx context.Context, u *url.URL, logger watermill.
 
 	subscriber, err := sqs.NewSubscriber(
 		sqs.SubscriberConfig{
-			AWSConfig:    awsCfg,
-			Unmarshaler:  marshalerUnmarshaler,
-			CloseTimeout: config.CloseTimeout,
-			ReceiveMessageParams: &types.ReceiveMessageInput{
-				WaitTimeSeconds:       int32(config.WaitTimeSeconds),
-				VisibilityTimeout:     int32(config.VisibilityTimeout),
-				MaxNumberOfMessages:   10, // A reasonable default for batching
-				MessageAttributeNames: []string{"All"},
-			},
+			AWSConfig:                   awsCfg,
+			Unmarshaler:                 unmarshaler,
+			OptFns:                      nil,
+			DoNotCreateQueueIfNotExists: false,
+			QueueUrlResolver:            nil,
+			ReconnectRetrySleep:         0,
+			QueueConfigAttributes:       sqs.QueueConfigAttributes{},
+			GenerateCreateQueueInput:    nil,
+			GenerateReceiveMessageInput: nil,
+			GenerateDeleteMessageInput:  nil,
+			//CloseTimeout: config.CloseTimeout,
+			//ReceiveMessageParams: &types.ReceiveMessageInput{
+			//	WaitTimeSeconds:       int32(config.WaitTimeSeconds),
+			//	VisibilityTimeout:     int32(config.VisibilityTimeout),
+			//	MaxNumberOfMessages:   10, // A reasonable default for batching
+			//	MessageAttributeNames: []string{"All"},
+			//},
 		},
 		logger,
 	)

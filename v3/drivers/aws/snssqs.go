@@ -44,12 +44,9 @@ func (d *SnsSqsDriver) NewPubSub(ctx context.Context, u *url.URL, logger watermi
 	var sqsUnmarshaler sqs.Unmarshaler
 
 	switch config.Marshaler {
-	case "json":
-		snsMarshaler = &sns.JSONMarshaler{}
-		sqsUnmarshaler = &sqs.JSONMarshaler{}
 	default: // "default"
-		snsMarshaler = &sns.DefaultMarshaler{}
-		sqsUnmarshaler = &sqs.DefaultMarshaler{}
+		snsMarshaler = &sns.DefaultMarshalerUnmarshaler{}
+		sqsUnmarshaler = &sqs.DefaultMarshalerUnmarshaler{}
 	}
 
 	publisher, err := sns.NewPublisher(
@@ -65,15 +62,23 @@ func (d *SnsSqsDriver) NewPubSub(ctx context.Context, u *url.URL, logger watermi
 
 	subscriber, err := sqs.NewSubscriber(
 		sqs.SubscriberConfig{
-			AWSConfig:    awsCfg,
-			Unmarshaler:  sqsUnmarshaler,
-			CloseTimeout: config.CloseTimeout,
-			ReceiveMessageParams: &types.ReceiveMessageInput{
-				WaitTimeSeconds:       int32(config.WaitTimeSeconds),
-				VisibilityTimeout:     int32(config.VisibilityTimeout),
-				MaxNumberOfMessages:   10, // A reasonable default for batching
-				MessageAttributeNames: []string{"All"},
-			},
+			AWSConfig:                   awsCfg,
+			Unmarshaler:                 sqsUnmarshaler,
+			OptFns:                      nil,
+			DoNotCreateQueueIfNotExists: false,
+			QueueUrlResolver:            nil,
+			ReconnectRetrySleep:         0,
+			QueueConfigAttributes:       sqs.QueueConfigAttributes{},
+			GenerateCreateQueueInput:    nil,
+			GenerateReceiveMessageInput: nil,
+			GenerateDeleteMessageInput:  nil,
+			//CloseTimeout:                config.CloseTimeout,
+			//ReceiveMessageParams: &types.ReceiveMessageInput{
+			//	WaitTimeSeconds:       int32(config.WaitTimeSeconds),
+			//	VisibilityTimeout:     int32(config.VisibilityTimeout),
+			//	MaxNumberOfMessages:   10, // A reasonable default for batching
+			//	MessageAttributeNames: []string{"All"},
+			//},
 		},
 		logger,
 	)
